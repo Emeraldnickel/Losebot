@@ -1,0 +1,30 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+
+# Bot-generated configuration and state
+server_thresholds.json
+custom_react_actions.json
+
+# Logs and local runtime files
+*.log
+logs/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
