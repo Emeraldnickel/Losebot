@@ -7,7 +7,7 @@ from enum import Enum, auto
 
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 
 DEFAULT_THRESHOLD = 5
@@ -189,6 +189,8 @@ class CustomReactionActions(commands.Cog):
             if not isinstance(author, discord.Member) or author.bot:
                 return
 
+            await message.add_reaction(payload.emoji)
+
             action_performed = False
             default_response = ""
 
@@ -263,24 +265,38 @@ class CustomReactionActions(commands.Cog):
                     )
 
             if action_performed:
-                await message.add_reaction(payload.emoji)
                 response = response_message or default_response
                 if response:
                     await message.reply(
                         response.replace("{user}", author.display_name)
                     )
         except discord.Forbidden:
+            if message is not None:
+                try:
+                    await message.add_reaction(payload.emoji)
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
             if channel is not None and author is not None:
                 await channel.send(
                     f"Failed to perform action on {author.mention}. "
                     "I might not have the required permissions."
                 )
         except discord.HTTPException as error:
+            if message is not None:
+                try:
+                    await message.add_reaction(payload.emoji)
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
             if channel is not None and author is not None:
                 await channel.send(
                     f"Failed to perform action on {author.mention}. Error: {error}"
                 )
         except Exception as error:
+            if message is not None:
+                try:
+                    await message.add_reaction(payload.emoji)
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
             if channel is not None and author is not None:
                 await channel.send(
                     "An unexpected error occurred while trying to perform action on "
