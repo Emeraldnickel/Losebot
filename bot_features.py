@@ -266,7 +266,7 @@ class CustomReactionActions(commands.Cog):
                 await message.add_reaction(payload.emoji)
                 response = response_message or default_response
                 if response:
-                    await channel.send(
+                    await message.reply(
                         response.replace("{user}", author.display_name)
                     )
         except discord.Forbidden:
@@ -451,11 +451,22 @@ class CustomReactionActions(commands.Cog):
             ephemeral=True,
         )
 
+    async def action_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        current = current.upper()
+        return [
+            app_commands.Choice(name=action.name, value=action.name)
+            for action in CustomAction
+            if current in action.name
+        ][:25]
+
     @app_commands.command(
         name="define_custom_trigger",
         description="Define a custom reaction trigger for a specific action."
     )
     @app_commands.guild_only()
+    @app_commands.autocomplete(action=action_autocomplete)
     @app_commands.describe(
         action="Action to perform when the threshold is reached (use /list_actions for valid options).",
         duration="Duration in minutes for actions that require it (e.g., MUTE).",
