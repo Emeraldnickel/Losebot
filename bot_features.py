@@ -606,24 +606,22 @@ class HammerFeatures(commands.Cog):
     def __init__(self, bot: commands.Bot, thresholds_path: Path):
         self.bot = bot
 
-        # Initialisation for beating people with hammers
-        self.hammered_messages: set[int] = set()
         self.processing_messages: set[int] = set()
         self.message_state_lock = asyncio.Lock()
         self.thresholds_path = thresholds_path
         self.server_thresholds = load_server_thresholds(thresholds_path)
-
-    # Cleanup tasks on cog unload
-    def cog_unload(self):
-        self.clear_hammered_messages.cancel()
 
     # What to run when the bot is ready
     @commands.Cog.listener()
     async def on_ready(self):
         if self.bot.user is not None:
             print(f"Logged in as {self.bot.user.name}")
-        if not self.clear_hammered_messages.is_running():
-            self.clear_hammered_messages.start()
+
+    async def mark_hammered(self, message: discord.Message) -> None:
+        try:
+            await message.add_reaction("🔨")
+        except (discord.Forbidden, discord.HTTPException):
+            pass
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -641,14 +639,12 @@ class HammerFeatures(commands.Cog):
             return
 
         async with self.message_state_lock:
-            if (
-                payload.message_id in self.hammered_messages
-                or payload.message_id in self.processing_messages
-            ):
+            if payload.message_id in self.processing_messages:
                 return
             self.processing_messages.add(payload.message_id)
 
         channel = None
+        message = None
         author = None
         try:
             guild = self.bot.get_guild(payload.guild_id)
@@ -664,7 +660,11 @@ class HammerFeatures(commands.Cog):
             threshold = self.server_thresholds.get(
                 payload.guild_id, DEFAULT_THRESHOLD
             )
-            if hammer_react is None or hammer_react.count < threshold or hammer_react.me:
+            if (
+                hammer_react is None
+                or hammer_react.count < threshold
+                or hammer_react.me
+            ):
                 return
 
             author = message.author
@@ -675,34 +675,37 @@ class HammerFeatures(commands.Cog):
                 await author.timeout(
                     datetime.timedelta(minutes=1), reason="Killed with hammers"
                 )
+                await self.mark_hammered(message)
+                await channel.send(
+                    f"{author.mention} was killed with hammers (democratically)"
+                )
             else:
+                await self.mark_hammered(message)
                 await channel.send(
                     f"I tried to kill {author.mention} with hammers but I couldn't. Please glare at them angrily instead"
                 )
                 return
-
-            await message.add_reaction(payload.emoji)
-
-            await channel.send(
-                f"{author.mention} was killed with hammers (democratically)"
-            )
-            async with self.message_state_lock:
-                self.hammered_messages.add(payload.message_id)
             print(
                 f"Successfully timed out {author} for 1 minute due to hammer reactions."
             )
         except discord.Forbidden:
+            if message is not None:
+                await self.mark_hammered(message)
             if channel is not None and author is not None:
                 await channel.send(
                     f"Failed to timeout {author.mention}. "
                     "I might not have the required permissions."
                 )
         except discord.HTTPException as error:
+            if message is not None:
+                await self.mark_hammered(message)
             if channel is not None and author is not None:
                 await channel.send(
                     f"Failed to timeout {author.mention}. Error: {error}"
                 )
         except Exception as error:
+            if message is not None:
+                await self.mark_hammered(message)
             if channel is not None and author is not None:
                 await channel.send(
                     "An unexpected error occurred while trying to timeout "
@@ -754,7 +757,7 @@ class HammerFeatures(commands.Cog):
         )
 
     @app_commands.command(
-        name="reset_memory", description="Reset the hammered messages set."
+        name="reset_memory", description="Reset temporary hammer-processing state."
     )
     @app_commands.guild_only()
     async def reset_memory(self, interaction: discord.Interaction):
@@ -769,13 +772,8 @@ class HammerFeatures(commands.Cog):
             return
 
         async with self.message_state_lock:
-            self.hammered_messages.clear()
+            self.processing_messages.clear()
         await interaction.response.send_message(
-            "Hammered messages set has been reset.", ephemeral=True
+            "Temporary hammer-processing state has been reset. Existing hammer reactions remain as idempotency markers.",
+            ephemeral=True,
         )
-
-    @tasks.loop(hours=24)
-    async def clear_hammered_messages(self):
-        async with self.message_state_lock:
-            self.hammered_messages.clear()
-        print("Cleared hammered messages set.")
