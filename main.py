@@ -27,9 +27,9 @@ if use_shards:
             )
 
         async def setup_hook(self):
-            await self.add_cog(
-                HammerFeatures(self, Path(__file__).with_name("server_thresholds.json"))
-            )
+            # await self.add_cog(
+            #     HammerFeatures(self, Path(__file__).with_name("server_thresholds.json"))
+            # )
             await self.add_cog(
                 CustomReactionActions(self, Path(__file__).with_name("custom_react_actions.json"))
             )
@@ -55,9 +55,9 @@ else:
                 )
     
             async def setup_hook(self):
-                await self.add_cog(
-                    HammerFeatures(self, Path(__file__).with_name("server_thresholds.json"))
-                )
+                # await self.add_cog(
+                #     HammerFeatures(self, Path(__file__).with_name("server_thresholds.json"))
+                # )
                 await self.add_cog(
                     CustomReactionActions(self, Path(__file__).with_name("custom_react_actions.json"))
                 )
