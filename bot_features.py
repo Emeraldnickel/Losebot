@@ -76,7 +76,7 @@ class CustomAction(Enum):
     ROLE = auto()
 
 class CustomReactionActions(commands.Cog):
-    def __init__(self, bot: commands.Bot, data_path: Path | None = None):
+    def __init__(self, bot: commands.Bot | commands.AutoShardedBot, data_path: Path | None = None):
         self.bot = bot
 
         self.data_path = data_path or Path(__file__).with_name("custom_react_actions.json")
@@ -616,6 +616,73 @@ class CustomReactionActions(commands.Cog):
         }
         with self.data_path.open("w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
+
+class MinuteOfSilenceFeatures(commands.Cog):
+    def __init__(self, bot: commands.Bot | commands.AutoShardedBot):
+        self.bot = bot
+        self.armed_guilds = set()
+
+
+    def parsedate(self, date_str: str) -> datetime.datetime:
+        dt = datetime.datetime.fromisoformat(date_str)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(datetime.timezone.utc)
+
+    @app_commands.command(
+        name = "arm_silence", description="Arm the keyword silence feature, or disable it if armed"
+    )
+    @app_commands.guild_only()
+    async def arm_silence(self, interaction: discord.Interaction):
+        guild_id = interaction.guild_id
+        if guild_id in self.armed_guilds:
+            self.armed_guilds.remove(guild_id)
+            await interaction.response.send_message("Disarmed the keyword silence feature in this server.")
+        else:
+            self.armed_guilds.add(guild_id)
+            await interaction.response.send_message("Armed the keyword silence feature in this server.")
+
+
+    @app_commands.command(
+        name = "kword_silence", description = "Silence everyone who mentioned a keyword in a time period"
+    )
+    @app_commands.guild_only()
+    async def kword_silence(self, interaction: discord.Interaction, keyword: str, duration: int = 1, 
+                            start: str = "YYYY-MM-DD",
+                            end: str = "YYYY-MM-DD"):
+
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                "Only server administrators can start a minute of silence.",
+                ephemeral=True,
+            )
+            return
+        if not interaction.guild_id in self.armed_guilds:
+            await interaction.response.send_message(
+                "This feature is not enabled in this server!",
+                ephemeral=True,
+            )
+        
+        await interaction.response.defer(thinking=True)
+        
+        # Set default datetimes to last day
+        try:
+            start_dt = datetime.datetime.now() - datetime.timedelta(days=1) if start == "YYYY-MM-DD" else self.parsedate(start)
+            end_dt = datetime.datetime.now() if end == "YYYY-MM-DD" else self.parsedate(end)
+        except ValueError:
+            await interaction.followup.send("Invalid date format! Please use 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM'.")
+            return
+
+        found_users = set()
+        async for message in interaction.channel.history(limit = None, after = start_dt, before = end_dt):
+            if keyword.lower() in message.content.lower():
+                found_users.add(message.author)
+
+        await interaction.followup.send(f"Now enforcing {"1 minute" if duration == 1 else f"{duration} minutes"} of silence for {len(found_users)} users...")
+        for user in found_users:
+            await user.timeout(
+                datetime.timedelta(minutes=duration), reason="Muted for minute/s of silence"
+            )
 
 
 class HammerFeatures(commands.Cog):

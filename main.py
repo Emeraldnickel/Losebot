@@ -4,7 +4,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
-from bot_features import CustomReactionActions, HammerFeatures
+from bot_features import CustomReactionActions, HammerFeatures, MinuteOfSilenceFeatures
 
 use_shards = False
 
@@ -33,6 +33,9 @@ if use_shards:
             await self.add_cog(
                 CustomReactionActions(self, Path(__file__).with_name("custom_react_actions.json"))
             )
+            await self.add_cog(
+                MinuteOfSilenceFeatures(self)
+            )
             await self.tree.sync()
 
         async def close(self):
@@ -60,6 +63,9 @@ else:
                 # )
                 await self.add_cog(
                     CustomReactionActions(self, Path(__file__).with_name("custom_react_actions.json"))
+                )
+                await self.add_cog(
+                    MinuteOfSilenceFeatures(self)
                 )
                 await self.tree.sync()
     
