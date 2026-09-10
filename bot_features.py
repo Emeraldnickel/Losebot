@@ -657,6 +657,9 @@ class MinuteOfSilenceFeatures(commands.Cog):
                 ephemeral=True,
             )
             return
+
+        print(f"{interaction.user} is currently attempting to initiate keyword silence with keyword {keyword} and duration {duration} minute/s.")
+        
         if not interaction.guild_id in self.armed_guilds:
             await interaction.response.send_message(
                 "This feature is not enabled in this server!",
