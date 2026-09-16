@@ -851,7 +851,7 @@ class PopularityContest(commands.Cog):
         self.nomination_ch_id[interaction.guild.id] = channel.id
         self.save_data()
 
-        if old_channel_id is not None:
+        if old_channel_id is not None and old_channel_id != channel.id:
             old_channel = interaction.guild.get_channel(old_channel_id)
             if old_channel is not None and isinstance(old_channel, discord.TextChannel):
                 try:
