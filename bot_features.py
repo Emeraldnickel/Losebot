@@ -706,6 +706,7 @@ class PopularityContest(commands.Cog):
         self.member_role_id: dict[int, int | None] = {}
 
         if self.data_path.is_file():
+            print("Fetching popularity contest vars from file...")
             with self.data_path.open("r", encoding="utf-8") as data_file:
                 data = json.load(data_file)
 
@@ -749,6 +750,8 @@ class PopularityContest(commands.Cog):
                 int(guild_id): role_id
                 for guild_id, role_id in data.get("member_role_id", {}).items()
             }
+        print("Initialised popularity contest functions!")
+
 
     def save_data(self):
         data = {
@@ -891,7 +894,7 @@ class PopularityContest(commands.Cog):
 
     @app_commands.command(
             name="set_contest_ping", 
-            description="Set the role to ping when starting a popularity contest. Can also be no role (leave the option blank)."
+            description="Set contest ping role. Can also be no role (leave the option blank)."
             )
     @app_commands.guild_only
     async def set_contest_ping(self, interaction: discord.Interaction, role: discord.Role | None = None):
