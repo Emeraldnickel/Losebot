@@ -870,7 +870,8 @@ class PopularityContest(commands.Cog):
                     return
 
         await interaction.response.send_message(
-            f"Set popularity contest nomination channel to {channel.mention}!"
+            f"Set popularity contest nomination channel to {channel.mention}!",
+            ephemeral=True
         )
 
     @app_commands.command(name="set_poll_channel", description="Set the channel to send the popularity contest poll in.")
@@ -890,7 +891,8 @@ class PopularityContest(commands.Cog):
         self.poll_ch_id[interaction.guild.id] = channel.id
         self.save_data()
         await interaction.response.send_message(
-            f"Set popularity contest poll channel to {channel.mention}!"
+            f"Set popularity contest poll channel to {channel.mention}!",
+            ephemeral=True
         )
 
     @app_commands.command(name="set_announcement_channel", description="Set the channel to announce the popularity contest winner in.")
@@ -910,7 +912,8 @@ class PopularityContest(commands.Cog):
         self.announcement_ch_id[interaction.guild.id] = channel.id
         self.save_data()
         await interaction.response.send_message(
-            f"Set popularity contest winners' announcement channel to {channel.mention}!"
+            f"Set popularity contest winners' announcement channel to {channel.mention}!",
+            ephemeral=true
         )
 
     @app_commands.command(
