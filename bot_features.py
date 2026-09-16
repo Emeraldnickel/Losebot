@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 from enum import Enum, auto
+from collections import defaultdict
 
 import discord
 from discord import app_commands
@@ -694,20 +695,25 @@ class PopularityContest(commands.Cog):
         self.timeout_interval = 300  # In seconds
 
         # PERSISTENT VARIABLES
-        self.nomination_ch_id: int | None = None
-        self.poll_ch_id: int | None = None
-        self.announcement_ch_id: int | None = None
-        self.contest_role_id: int | None = None
-        self.contest_manager_roles: set[int] = set()
-        self.contest_start_message: str = "A popularity contest has started! Nominate your choices now in {channel}!"
-        self.contest_end_message: str = "The popularity contest has concluded! Your winner is... {user}!"
+        self.nomination_ch_id: dict[int, int] = {}
+        self.poll_ch_id: dict[int, int] = {}
+        self.announcement_ch_id: dict[int, int] = {}
+        self.contest_role_id: dict[int, int | None] = {}
+        self.contest_manager_roles: dict[int, set[int]] = {}
+        self.contest_start_message: defaultdict = defaultdict(lambda: "A popularity contest has started! Nominate your choices now in {channel}!")
+        self.contest_end_message: defaultdict = defaultdict(lambda: "The popularity contest has concluded! Your winner is... {user}!")
 
         # EPHEMERAL
         self.nominated_users: set[int] = set()
 
+    def close_channel(self, guild: discord.Guild, channel: discord.TextChannel):
+        everyone_role = guild.default_role
+
     @app_commands.command(name="set_nomination_channel", description="Set the channel to nominate the weekly winner in.")
     @app_commands.guild_only
     async def set_nomination_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        if interaction.guild is None:
+            return
         if (
             not isinstance(interaction.user, discord.Member)
             or not interaction.user.guild_permissions.administrator
@@ -717,7 +723,7 @@ class PopularityContest(commands.Cog):
                 ephemeral=True,
             )
             return
-        self.nomination_ch_id = channel.id
+        self.nomination_ch_id[interaction.guild.id] = channel.id
         await interaction.response.send_message(
             f"Set popularity contest nomination channel to {channel.mention}!"
         )
@@ -725,6 +731,8 @@ class PopularityContest(commands.Cog):
     @app_commands.command(name="set_poll_channel", description="Set the channel to send the popularity contest poll in.")
     @app_commands.guild_only
     async def set_poll_channel(self, interaction:discord.Interaction, channel: discord.TextChannel):
+        if interaction.guild is None:
+            return
         if (
             not isinstance(interaction.user, discord.Member)
             or not interaction.user.guild_permissions.administrator
@@ -734,7 +742,7 @@ class PopularityContest(commands.Cog):
                 ephemeral=True,
             )
             return
-        self.poll_ch_id = channel.id
+        self.poll_ch_id[interaction.guild.id] = channel.id
         await interaction.response.send_message(
             f"Set popularity contest poll channel to {channel.mention}!"
         )
@@ -742,6 +750,8 @@ class PopularityContest(commands.Cog):
     @app_commands.command(name="set_announcement_channel", description="Set the channel to announce the popularity contest winner in.")
     @app_commands.guild_only
     async def set_announcement_channel(self, interaction:discord.Interaction, channel:discord.TextChannel):
+        if interaction.guild is None:
+            return
         if (
             not isinstance(interaction.user, discord.Member)
             or not interaction.user.guild_permissions.administrator
@@ -751,7 +761,7 @@ class PopularityContest(commands.Cog):
                 ephemeral=True,
             )
             return
-        self.announcement_ch_id = channel.id
+        self.announcement_ch_id[interaction.guild.id] = channel.id
         await interaction.response.send_message(
             f"Set popularity contest winners' announcement channel to {channel.mention}!"
         )
@@ -762,6 +772,8 @@ class PopularityContest(commands.Cog):
             )
     @app_commands.guild_only
     async def set_contest_ping(self, interaction: discord.Interaction, role: discord.Role | None = None):
+        if interaction.guild is None:
+            return
         if (
             not isinstance(interaction.user, discord.Member)
             or not interaction.user.guild_permissions.administrator
@@ -772,13 +784,13 @@ class PopularityContest(commands.Cog):
             )
             return
         if role is None:
-            self.contest_role_id = None
+            self.contest_role_id[interaction.guild.id] = None
             await interaction.response.send_message(
                 "Removed popularity contest role.",
                 ephemeral=True
             )
             return
-        self.contest_role_id = role.id
+        self.contest_role_id[interaction.guild.id] = role.id
         await interaction.response.send_message(
             f"Set {role.mention} as the popularity contest role to ping.",
             ephemeral=True,
@@ -788,6 +800,8 @@ class PopularityContest(commands.Cog):
     @app_commands.command(name="contest_manager_role", description="Manage popularity contest manager roles.")
     @app_commands.guild_only
     async def contest_manager_role(self, interaction: discord.Interaction, action: str, role: discord.Role):
+        if interaction.guild is None:
+            return
         if (
             not isinstance(interaction.user, discord.Member)
             or not interaction.user.guild_permissions.administrator
@@ -797,17 +811,19 @@ class PopularityContest(commands.Cog):
                 ephemeral=True,
             )
             return
+        if interaction.guild.id not in self.contest_manager_roles.keys():
+            self.contest_manager_roles[interaction.guild.id] = set()
         match action.upper:
             case "ADD":
-                self.contest_manager_roles.add(role.id)
+                self.contest_manager_roles[interaction.guild.id].add(role.id)
                 await interaction.response.send_message(
                     f"Added {role.mention} as a contest manager role.",
                     ephemeral=True,
                 )
                 return
             case "REMOVE":
-                if role.id in self.contest_manager_roles:
-                    self.contest_manager_roles.remove(role.id)
+                if role.id in self.contest_manager_roles[interaction.guild.id]:
+                    self.contest_manager_roles[interaction.guild.id].remove(role.id)
                     await interaction.response.send_message(
                         f"Removed {role.mention} as a contest manager role.",
                         ephemeral=True,
@@ -832,6 +848,8 @@ class PopularityContest(commands.Cog):
         )
     @app_commands.guild_only
     async def set_contest_start_message(self, interaction: discord.Interaction, message: str):
+        if interaction.guild is None:
+            return
         if (
             not isinstance(interaction.user, discord.Member)
             or not interaction.user.guild_permissions.administrator
@@ -841,7 +859,7 @@ class PopularityContest(commands.Cog):
                 ephemeral=True,
             )
             return
-        self.contest_start_message = message
+        self.contest_start_message[interaction.guild.id] = message
         await interaction.response.send_message(
             f"Successfully changed popularity contest starting message.",
             ephemeral=True,
@@ -854,6 +872,8 @@ class PopularityContest(commands.Cog):
         )
     @app_commands.guild_only
     async def set_contest_end_message(self, interaction: discord.Interaction, message: str):
+        if interaction.guild is None:
+            return
         if (
             not isinstance(interaction.user, discord.Member)
             or not interaction.user.guild_permissions.administrator
@@ -863,7 +883,7 @@ class PopularityContest(commands.Cog):
                 ephemeral=True,
             )
             return
-        self.contest_start_message = message
+        self.contest_start_message[interaction.guild.id] = message
         await interaction.response.send_message(
             f"Successfully changed popularity contest ending message.",
             ephemeral=True,
@@ -876,14 +896,15 @@ class PopularityContest(commands.Cog):
         guild = interaction.guild
         if guild is None: 
             return
+        guild_id = guild.id
 
-        if self.nomination_ch_id is None:
+        if self.nomination_ch_id[guild_id] is None:
             await interaction.response.send_message(
                 "Nomination channel not configured!",
                 ephemeral=True
             )
             return
-        nomination_channel = guild.get_channel(self.nomination_ch_id)
+        nomination_channel = guild.get_channel(self.nomination_ch_id[guild_id])
         if nomination_channel is None:
             await interaction.response.send_message(
                 "Nomination channel not configured!",
@@ -891,13 +912,13 @@ class PopularityContest(commands.Cog):
             )
             return
 
-        if self.announcement_ch_id is None:
+        if self.announcement_ch_id[guild_id] is None:
             await interaction.response.send_message(
                 "Announcement channel not configured!",
                 ephemeral=True
             )
             return
-        announcement_channel = guild.get_channel(self.announcement_ch_id)
+        announcement_channel = guild.get_channel(self.announcement_ch_id[guild_id])
         if announcement_channel is None:
             await interaction.response.send_message(
                 "Announcement channel not configured!",
@@ -905,13 +926,13 @@ class PopularityContest(commands.Cog):
             )
             return
 
-        if self.poll_ch_id is None:
+        if self.poll_ch_id[guild_id] is None:
             await interaction.response.send_message(
                 "Poll channel not configured!",
                 ephemeral=True
             )
             return
-        poll_channel = guild.get_channel(self.poll_ch_id)
+        poll_channel = guild.get_channel(self.poll_ch_id[guild_id])
         if poll_channel is None:
             await interaction.response.send_message(
                 "Poll channel not configured!",
@@ -921,15 +942,18 @@ class PopularityContest(commands.Cog):
 
         # 1: Send commencement message
         message = ""
-        if self.contest_role_id is not None:
-            contest_role = guild.get_role(self.contest_role_id)
+        if self.contest_role_id[guild_id] is not None:
+            contest_role = guild.get_role(self.contest_role_id[guild_id])
             if contest_role is not None:
                 message = contest_role.mention + " "
 
-        message += self.contest_start_message.replace("{channel}", nomination_channel.mention)
+        message += self.contest_start_message[guild_id].replace("{channel}", nomination_channel.mention)
         announcement_channel.send(message)
 
         # 2: Open nomination channel, start listening for messages and adding to nominated users list
+
+
+
         # 3: Create poll and wait
         # 4: Fetch poll message and decide winner
 
