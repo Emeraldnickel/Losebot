@@ -795,7 +795,7 @@ class PopularityContest(commands.Cog):
 
     async def close_channel(self, guild: discord.Guild, channel: discord.TextChannel):
         everyone_role = guild.default_role
-        member_id = self.member_role_id[guild.id]
+        member_id = self.member_role_id.get(guild.id, None)
         if member_id is not None:
             member_role = guild.get_role(member_id)
             if member_role is not None:
@@ -805,7 +805,7 @@ class PopularityContest(commands.Cog):
 
     async def open_channel(self, guild: discord.Guild, channel: discord.TextChannel):
         everyone_role = guild.default_role
-        member_id = self.member_role_id[guild.id]
+        member_id = self.member_role_id.get(guild.id, None)
         if member_id is not None:
             member_role = guild.get_role(member_id)
             if member_role is not None:
@@ -1091,19 +1091,35 @@ class PopularityContest(commands.Cog):
 
     @app_commands.command(name="popularity_contest", description="Start a popularity contest.")
     @app_commands.guild_only
-    async def popularity_contest(self, interaction:discord.Interaction, max_nominations: int = 10, winners: int = 1):
+    async def popularity_contest(self, interaction:discord.Interaction, max_nominations: int = 10):
         guild = interaction.guild
         if guild is None: 
             return
         guild_id = guild.id
 
+        manager_roles = self.contest_manager_roles.get(guild_id, None)
+        if not manager_roles:
+            await interaction.response.send_message(
+                "Configure at least one contest manager role to start a popularity contest.",
+                ephemeral=True
+            )
+            return
+
         if (
             not isinstance(interaction.user, discord.Member)
-            or not any(role_id in [role.id for role in interaction.user.roles] for role_id in self.contest_manager_roles[guild_id])
+            or not any(role_id in [role.id for role in interaction.user.roles] for role_id in manager_roles)
         ):
             await interaction.response.send_message(
                 "You don't have a role that allows you to start a popularity contest!"
             )
+            return
+
+        if not 1 <= max_nominations <= 10:
+            await interaction.response.send_message(
+                "The valid range of max nominations is 1-10.",
+                ephemeral=True
+            )
+            return
 
         nomination_id = self.nomination_ch_id.get(guild_id, None)
         if nomination_id is None:
@@ -1152,8 +1168,9 @@ class PopularityContest(commands.Cog):
 
         # 1: Send commencement message
         message = ""
-        if self.contest_role_id[guild_id] is not None:
-            contest_role = guild.get_role(self.contest_role_id[guild_id]) # pyright: ignore[reportArgumentType]
+        contest_role_id = self.contest_role_id.get(guild_id, None)
+        if contest_role_id is not None:
+            contest_role = guild.get_role(contest_role_id) # pyright: ignore[reportArgumentType]
             if contest_role is not None:
                 message = contest_role.mention + " "
 
@@ -1183,7 +1200,7 @@ class PopularityContest(commands.Cog):
             def check(m: discord.Message):
                 if m.channel != nomination_channel or m.author.bot or not m.mentions:
                     return False
-                if m.mentions == 1:
+                if len(m.mentions) == 1:
                     return True
                 return False
 
@@ -1193,6 +1210,10 @@ class PopularityContest(commands.Cog):
                 target_user = message.mentions[0]
                 if target_user.id in [u.id for u in nominations]:
                     await nomination_channel.send(f"User {target_user.display_name} is already nominated!")
+                    continue
+
+                if target_user.display_name in nomination_map.keys():
+                    await nomination_channel.send(f"Can't nominate {target_user.mention} because someone with their display name is already nominated...")
                     continue
 
                 exempt_role_ids = self.contest_exempt_roles.get(guild_id, set())
@@ -1213,20 +1234,23 @@ class PopularityContest(commands.Cog):
                 if remaining > 0:
                     await nomination_channel.send(f"Remaining nominations available: {remaining} more members.")
             except asyncio.TimeoutError:
-                await nomination_channel.send(f"{max_nominations} nominations have been collected!")
+                await nomination_channel.send(f"Timeout period of {self.timeout_interval} seconds has elapsed.")
+                break
 
-            try:
-                await self.close_channel(guild, nomination_channel)
-            except discord.Forbidden:
-                await interaction.response.send_message(
-                    "Couldn't close the nominations channel properly; I might not have the correct permissions. Please close it manually!",
-                    ephemeral=True,
-                )
-            except discord.HTTPException as e:
-                await interaction.response.send_message(
-                    f"Something went wrong! API error is as follows: {e}",
-                    ephemeral=True,
-                )
+        await nomination_channel.send(f"{max_nominations} nominations have been collected. Now creating poll in {poll_channel.mention}...")
+
+        try:
+            await self.close_channel(guild, nomination_channel)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "Couldn't close the nominations channel properly; I might not have the correct permissions. Please close it manually!",
+                ephemeral=True,
+            )
+        except discord.HTTPException as e:
+            await interaction.response.send_message(
+                f"Something went wrong! API error is as follows: {e}",
+                ephemeral=True,
+            )
 
         # 3: Create poll and wait
 
@@ -1282,7 +1306,7 @@ class PopularityContest(commands.Cog):
                 joined_mentions = ", ".join(winner_mentions[:-1]) + f"{"," if len(winner_mentions) > 2 else ""} and " + winner_mentions[-1]
                 victory_message = end_message.replace("{user}", joined_mentions)
 
-            await announcement_channel.send(victory_message.replace("{votes}", max_votes))
+            await announcement_channel.send(victory_message.replace("{votes}", str(max_votes)))
 
 
 
