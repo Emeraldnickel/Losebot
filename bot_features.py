@@ -1292,12 +1292,16 @@ class PopularityContest(commands.Cog):
                     await nomination_channel.send(f"Can't nominate {target_user.mention} because someone with their display name is already nominated...")
                     continue
 
+                if target_user.id == message.author.id:
+                    await nomination_channel.send(f"You can't nominate yourself!")
+                    continue
+
                 exempt_role_ids = self.contest_exempt_roles.get(guild_id, set())
                 if isinstance(target_user, discord.Member) and any(
                     role.id in exempt_role_ids for role in target_user.roles
                 ):
                     await nomination_channel.send(
-                        f"User {target_user.display_name} cannot be nominated."
+                        f"User {target_user.display_name} is exempt and cannot be nominated."
                     )
                     continue
 
