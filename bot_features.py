@@ -702,12 +702,28 @@ class PopularityContest(commands.Cog):
         self.contest_manager_roles: dict[int, set[int]] = {}
         self.contest_start_message: defaultdict = defaultdict(lambda: "A popularity contest has started! Nominate your choices now in {channel}!")
         self.contest_end_message: defaultdict = defaultdict(lambda: "The popularity contest has concluded! Your winner is... {user}!")
+        self.member_role_id: dict[int, int | None] = {}
 
-        # EPHEMERAL
-        self.nominated_users: set[int] = set()
-
-    def close_channel(self, guild: discord.Guild, channel: discord.TextChannel):
+    async def close_channel(self, guild: discord.Guild, channel: discord.TextChannel):
         everyone_role = guild.default_role
+        member_id = self.member_role_id[guild.id]
+        if member_id is not None:
+            member_role = guild.get_role(member_id)
+            if member_role is not None:
+                await channel.set_permissions(member_role, send_messages=False)
+        await channel.set_permissions(everyone_role, send_messages=False)
+        await channel.send("This channel is now locked.")
+
+    async def open_channel(self, guild: discord.Guild, channel: discord.TextChannel):
+        everyone_role = guild.default_role
+        member_id = self.member_role_id[guild.id]
+        if member_id is not None:
+            member_role = guild.get_role(member_id)
+            if member_role is not None:
+                await channel.set_permissions(member_role, send_messages=True)
+        await channel.set_permissions(everyone_role, send_messages=True)
+        await channel.send("Channel unlocked!")
+
 
     @app_commands.command(name="set_nomination_channel", description="Set the channel to nominate the weekly winner in.")
     @app_commands.guild_only
@@ -723,9 +739,24 @@ class PopularityContest(commands.Cog):
                 ephemeral=True,
             )
             return
+
+        try:
+            await self.close_channel(interaction.guild, channel)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "Couldn't close the nominations channel properly; I might not have the correct permissions!",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException as e:
+            await interaction.response.send_message(
+                f"Something went wrong! API error is as follows: {e}",
+                ephemeral=True,
+            )
+            return
         self.nomination_ch_id[interaction.guild.id] = channel.id
         await interaction.response.send_message(
-            f"Set popularity contest nomination channel to {channel.mention}!"
+            f"Set popularity contest nomination channel to {channel.mention}! Channel closed successfully."
         )
 
     @app_commands.command(name="set_poll_channel", description="Set the channel to send the popularity contest poll in.")
@@ -890,6 +921,30 @@ class PopularityContest(commands.Cog):
         )
         return
 
+    @app_commands.command(
+            name="set_member_role",
+            description="Set the default server member role. Necessary to close and open the nomination channel properly. No role means no default member role."
+    )
+    @app_commands.guild_only
+    async def set_member_role(self, interaction:discord.Interaction, role: discord.Role | None = None):
+        if interaction.guild is None:
+            return
+        if (
+            not isinstance(interaction.user, discord.Member)
+            or not interaction.user.guild_permissions.administrator
+        ):
+            await interaction.response.send_message(
+                "Only server administrators can configure popularity contest roles.",
+                ephemeral=True,
+            )
+            return
+        self.member_role_id[interaction.guild.id] = None if role is None else role.id
+        await interaction.response.send_message(
+            f"Successfully changed default member role.",
+            ephemeral=True,
+        )
+        return
+
     @app_commands.command(name="popularity_contest", description="Start a popularity contest.")
     @app_commands.guild_only
     async def popularity_contest(self, interaction:discord.Interaction, max_nominations: int = 10, winners: int = 1):
@@ -898,42 +953,53 @@ class PopularityContest(commands.Cog):
             return
         guild_id = guild.id
 
-        if self.nomination_ch_id[guild_id] is None:
+        if (
+            not isinstance(interaction.user, discord.Member)
+            or not any(role_id in [role.id for role in interaction.user.roles] for role_id in self.contest_manager_roles[guild_id])
+        ):
+            await interaction.response.send_message(
+                "You don't have a role that allows you to start a popularity contest!"
+            )
+
+        nomination_id = self.nomination_ch_id.get(guild_id, None)
+        if nomination_id is None:
             await interaction.response.send_message(
                 "Nomination channel not configured!",
                 ephemeral=True
             )
             return
-        nomination_channel = guild.get_channel(self.nomination_ch_id[guild_id])
-        if nomination_channel is None:
+        nomination_channel = guild.get_channel(nomination_id)
+        if nomination_channel is None or not isinstance(nomination_channel, discord.TextChannel):
             await interaction.response.send_message(
                 "Nomination channel not configured!",
                 ephemeral=True
             )
             return
 
-        if self.announcement_ch_id[guild_id] is None:
+        announcement_id = self.announcement_ch_id.get(guild_id, None)
+        if announcement_id is None:
             await interaction.response.send_message(
                 "Announcement channel not configured!",
                 ephemeral=True
             )
             return
-        announcement_channel = guild.get_channel(self.announcement_ch_id[guild_id])
-        if announcement_channel is None:
+        announcement_channel = guild.get_channel(announcement_id)
+        if announcement_channel is None or not isinstance(announcement_channel, discord.TextChannel):
             await interaction.response.send_message(
                 "Announcement channel not configured!",
                 ephemeral=True
             )
             return
 
-        if self.poll_ch_id[guild_id] is None:
+        poll_id = self.poll_ch_id.get(guild_id, None)
+        if poll_id is None:
             await interaction.response.send_message(
                 "Poll channel not configured!",
                 ephemeral=True
             )
             return
-        poll_channel = guild.get_channel(self.poll_ch_id[guild_id])
-        if poll_channel is None:
+        poll_channel = guild.get_channel(poll_id)
+        if poll_channel is None or not isinstance(poll_channel, discord.TextChannel):
             await interaction.response.send_message(
                 "Poll channel not configured!",
                 ephemeral=True
@@ -943,19 +1009,128 @@ class PopularityContest(commands.Cog):
         # 1: Send commencement message
         message = ""
         if self.contest_role_id[guild_id] is not None:
-            contest_role = guild.get_role(self.contest_role_id[guild_id])
+            contest_role = guild.get_role(self.contest_role_id[guild_id]) # pyright: ignore[reportArgumentType]
             if contest_role is not None:
                 message = contest_role.mention + " "
 
         message += self.contest_start_message[guild_id].replace("{channel}", nomination_channel.mention)
-        announcement_channel.send(message)
+        await announcement_channel.send(message)
 
         # 2: Open nomination channel, start listening for messages and adding to nominated users list
+        try:
+            await self.open_channel(guild, nomination_channel)
+            await nomination_channel.send("Nominations are open! Please **@mention** a user to nominate them.")
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "Couldn't open the nominations channel properly; I might not have the correct permissions!",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException as e:
+            await interaction.response.send_message(
+                f"Something went wrong! API error is as follows: {e}",
+                ephemeral=True,
+            )
+            return
 
+        nominations = []
+        nomination_map: dict[str, discord.User | discord.Member] = {}
+        while len(nominations) < max_nominations:
+            def check(m: discord.Message):
+                if m.channel != nomination_channel or m.author.bot or not m.mentions:
+                    return False
+                if m.mentions == 1:
+                    return True
+                return False
 
+            try:
+                message = await self.bot.wait_for('message', check=check, timeout=self.timeout_interval)
+
+                target_user = message.mentions[0]
+                if target_user.id in [u.id for u in nominations]:
+                    await nomination_channel.send(f"User {target_user.display_name} is already nominated!")
+                    continue
+
+                nominations.append(target_user)
+                nomination_map[target_user.display_name] = target_user
+                remaining = max_nominations - len(nominations)
+
+                await message.add_reaction("✅")
+                await message.reply(f"{message.author.mention} has nominated {target_user.mention}!")
+                if remaining > 0:
+                    await nomination_channel.send(f"Remaining nominations available: {remaining} more members.")
+            except asyncio.TimeoutError:
+                await nomination_channel.send(f"{max_nominations} nominations have been collected!")
+
+            try:
+                await self.close_channel(guild, nomination_channel)
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    "Couldn't close the nominations channel properly; I might not have the correct permissions. Please close it manually!",
+                    ephemeral=True,
+                )
+            except discord.HTTPException as e:
+                await interaction.response.send_message(
+                    f"Something went wrong! API error is as follows: {e}",
+                    ephemeral=True,
+                )
 
         # 3: Create poll and wait
+
+        poll = discord.Poll(
+            question="Who will win?",
+            duration=datetime.timedelta(hours=1),
+            multiple=False
+        )
+
+        emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
+        for i, user in enumerate(nominations):
+            poll.add_answer(text=user.display_name, emoji=emojis[i])
+
+        poll_message = await poll_channel.send(poll=poll)
+        await asyncio.sleep(3610)
+
         # 4: Fetch poll message and decide winner
+        poll_message = await poll_channel.fetch_message(poll_message.id)
+        end_message = self.contest_end_message[guild_id]
+
+        if poll_message.poll:
+            answers = poll_message.poll.answers
+            max_votes = -1
+            winner_answers = []
+
+            for answer in answers:
+                if answer.vote_count > max_votes:
+                    max_votes = answer.vote_count
+                    winner_answers = [answer]
+                elif answer.vote_count == max_votes and max_votes > 0:
+                    winner_answers.append(answer)
+
+            if not winner_answers or max_votes == 0:
+                victory_message = end_message.replace("{user}", "nobody")
+
+            elif len(winner_answers) == 1:
+                winner_name = winner_answers[0].text
+                winner_user = nomination_map.get(winner_name)
+
+                if winner_user:
+                    victory_message = end_message.replace("{user}", winner_user.mention)
+                else:
+                    victory_message = end_message.replace("{user}", f"**{winner_name}**")
+            else:
+                winner_mentions = []
+                for answer in winner_answers:
+                    winning_user = nomination_map[answer.text]
+                    if winning_user:
+                        winner_mentions.append(winning_user.mention)
+                    else:
+                        winner_mentions.append(f"**{answer.text}**")
+                joined_mentions = ", ".join(winner_mentions[:-1]) + f"{"," if len(winner_mentions) > 2 else ""} and " + winner_mentions[-1]
+                victory_message = end_message.replace("{user}", joined_mentions)
+
+            await announcement_channel.send(victory_message)
+
 
 
 class HammerFeatures(commands.Cog):
