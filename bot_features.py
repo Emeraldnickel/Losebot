@@ -832,6 +832,8 @@ class PopularityContest(commands.Cog):
             )
             return
 
+        old_channel_id = self.nomination_ch_id.get(interaction.guild.id, None)
+
         try:
             await self.close_channel(interaction.guild, channel)
         except discord.Forbidden:
@@ -848,8 +850,27 @@ class PopularityContest(commands.Cog):
             return
         self.nomination_ch_id[interaction.guild.id] = channel.id
         self.save_data()
+
+        if old_channel_id is not None:
+            old_channel = interaction.guild.get_channel(old_channel_id)
+            if old_channel is not None and isinstance(old_channel, discord.TextChannel):
+                try:
+                    await self.open_channel(interaction.guild, old_channel)
+                except discord.Forbidden:
+                    await interaction.response.send_message(
+                        "Couldn't close the nominations channel properly; I might not have the correct permissions!",
+                        ephemeral=True,
+                    )
+                    return
+                except discord.HTTPException as e:
+                    await interaction.response.send_message(
+                        f"Something went wrong! API error is as follows: {e}",
+                        ephemeral=True,
+                    )
+                    return
+
         await interaction.response.send_message(
-            f"Set popularity contest nomination channel to {channel.mention}! Channel closed successfully."
+            f"Set popularity contest nomination channel to {channel.mention}!"
         )
 
     @app_commands.command(name="set_poll_channel", description="Set the channel to send the popularity contest poll in.")
