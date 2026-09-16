@@ -1097,7 +1097,7 @@ class PopularityContest(commands.Cog):
         announcement_channel: discord.TextChannel,
         nomination_map: dict[str, discord.User | discord.Member],
     ):
-        await asyncio.sleep(3600)
+        await asyncio.sleep(3610)
 
         poll_message = await poll_channel.fetch_message(poll_message_id)
         end_message = self.contest_end_message[guild_id]
@@ -1141,6 +1141,25 @@ class PopularityContest(commands.Cog):
             victory_message.replace("{votes}", str(max_votes))
         )
 
+    async def run_finish_contest(
+        self,
+        guild_id: int,
+        poll_channel: discord.TextChannel,
+        poll_message_id: int,
+        announcement_channel: discord.TextChannel,
+        nomination_map: dict[str, discord.User | discord.Member],
+    ):
+        try:
+            await self.finish_contest(
+                guild_id,
+                poll_channel,
+                poll_message_id,
+                announcement_channel,
+                nomination_map,
+            )
+        except discord.HTTPException as error:
+            print(f"Failed to finish popularity contest for guild {guild_id}: {error}")
+
     @app_commands.command(name="popularity_contest", description="Start a popularity contest.")
     @app_commands.guild_only
     async def popularity_contest(self, interaction:discord.Interaction, max_nominations: int = 10):
@@ -1148,10 +1167,11 @@ class PopularityContest(commands.Cog):
         if guild is None: 
             return
         guild_id = guild.id
+        await interaction.response.defer(ephemeral=True)
 
         manager_roles = self.contest_manager_roles.get(guild_id, None)
         if not manager_roles:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Configure at least one contest manager role to start a popularity contest.",
                 ephemeral=True
             )
@@ -1161,13 +1181,14 @@ class PopularityContest(commands.Cog):
             not isinstance(interaction.user, discord.Member)
             or not any(role_id in [role.id for role in interaction.user.roles] for role_id in manager_roles)
         ):
-            await interaction.response.send_message(
-                "You don't have a role that allows you to start a popularity contest!"
+            await interaction.followup.send(
+                "You don't have a role that allows you to start a popularity contest!",
+                ephemeral=True,
             )
             return
 
         if not 1 <= max_nominations <= 10:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "The valid range of max nominations is 1-10.",
                 ephemeral=True
             )
@@ -1175,14 +1196,14 @@ class PopularityContest(commands.Cog):
 
         nomination_id = self.nomination_ch_id.get(guild_id, None)
         if nomination_id is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Nomination channel not configured!",
                 ephemeral=True
             )
             return
         nomination_channel = guild.get_channel(nomination_id)
         if nomination_channel is None or not isinstance(nomination_channel, discord.TextChannel):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Nomination channel not configured!",
                 ephemeral=True
             )
@@ -1190,14 +1211,14 @@ class PopularityContest(commands.Cog):
 
         announcement_id = self.announcement_ch_id.get(guild_id, None)
         if announcement_id is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Announcement channel not configured!",
                 ephemeral=True
             )
             return
         announcement_channel = guild.get_channel(announcement_id)
         if announcement_channel is None or not isinstance(announcement_channel, discord.TextChannel):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Announcement channel not configured!",
                 ephemeral=True
             )
@@ -1205,14 +1226,14 @@ class PopularityContest(commands.Cog):
 
         poll_id = self.poll_ch_id.get(guild_id, None)
         if poll_id is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Poll channel not configured!",
                 ephemeral=True
             )
             return
         poll_channel = guild.get_channel(poll_id)
         if poll_channel is None or not isinstance(poll_channel, discord.TextChannel):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Poll channel not configured!",
                 ephemeral=True
             )
@@ -1234,13 +1255,13 @@ class PopularityContest(commands.Cog):
             await self.open_channel(guild, nomination_channel)
             await nomination_channel.send("Nominations are open! Please **@mention** a user to nominate them.")
         except discord.Forbidden:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Couldn't open the nominations channel properly; I might not have the correct permissions!",
                 ephemeral=True,
             )
             return
         except discord.HTTPException as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"Something went wrong! API error is as follows: {e}",
                 ephemeral=True,
             )
@@ -1289,17 +1310,17 @@ class PopularityContest(commands.Cog):
                 await nomination_channel.send(f"Timeout period of {self.timeout_interval} seconds has elapsed.")
                 break
 
-        await nomination_channel.send(f"{max_nominations} nominations have been collected. Now creating poll in {poll_channel.mention}...")
+        await nomination_channel.send(f"{len(nominations)} nominations have been collected. Now creating poll in {poll_channel.mention}...")
 
         try:
             await self.close_channel(guild, nomination_channel)
         except discord.Forbidden:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Couldn't close the nominations channel properly; I might not have the correct permissions. Please close it manually!",
                 ephemeral=True,
             )
         except discord.HTTPException as e:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"Something went wrong! API error is as follows: {e}",
                 ephemeral=True,
             )
@@ -1319,7 +1340,7 @@ class PopularityContest(commands.Cog):
 
         poll_message = await poll_channel.send(poll=poll)
         asyncio.create_task(
-            self.finish_contest(
+            self.run_finish_contest(
                 guild_id,
                 poll_channel,
                 poll_message.id,
@@ -1327,7 +1348,7 @@ class PopularityContest(commands.Cog):
                 nomination_map,
             )
         )
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Popularity contest poll created in {poll_channel.mention}. Voting is open for one hour.",
             ephemeral=True,
         )
