@@ -1089,6 +1089,58 @@ class PopularityContest(commands.Cog):
         )
         return
 
+    async def finish_contest(
+        self,
+        guild_id: int,
+        poll_channel: discord.TextChannel,
+        poll_message_id: int,
+        announcement_channel: discord.TextChannel,
+        nomination_map: dict[str, discord.User | discord.Member],
+    ):
+        await asyncio.sleep(3600)
+
+        poll_message = await poll_channel.fetch_message(poll_message_id)
+        end_message = self.contest_end_message[guild_id]
+
+        if not poll_message.poll:
+            return
+
+        answers = poll_message.poll.answers
+        max_votes = -1
+        winner_answers = []
+
+        for answer in answers:
+            if answer.vote_count > max_votes:
+                max_votes = answer.vote_count
+                winner_answers = [answer]
+            elif answer.vote_count == max_votes and max_votes > 0:
+                winner_answers.append(answer)
+
+        if not winner_answers or max_votes == 0:
+            victory_message = end_message.replace("{user}", "nobody")
+        elif len(winner_answers) == 1:
+            winner_name = winner_answers[0].text
+            winner_user = nomination_map.get(winner_name)
+
+            if winner_user:
+                victory_message = end_message.replace("{user}", winner_user.mention)
+            else:
+                victory_message = end_message.replace("{user}", f"**{winner_name}**")
+        else:
+            winner_mentions = []
+            for answer in winner_answers:
+                winning_user = nomination_map.get(answer.text)
+                if winning_user:
+                    winner_mentions.append(winning_user.mention)
+                else:
+                    winner_mentions.append(f"**{answer.text}**")
+            joined_mentions = ", ".join(winner_mentions[:-1]) + f"{',' if len(winner_mentions) > 2 else ''} and " + winner_mentions[-1]
+            victory_message = end_message.replace("{user}", joined_mentions)
+
+        await announcement_channel.send(
+            victory_message.replace("{votes}", str(max_votes))
+        )
+
     @app_commands.command(name="popularity_contest", description="Start a popularity contest.")
     @app_commands.guild_only
     async def popularity_contest(self, interaction:discord.Interaction, max_nominations: int = 10):
@@ -1266,47 +1318,19 @@ class PopularityContest(commands.Cog):
             poll.add_answer(text=user.display_name, emoji=emojis[i])
 
         poll_message = await poll_channel.send(poll=poll)
-        await asyncio.sleep(3610)
-
-        # 4: Fetch poll message and decide winner
-        poll_message = await poll_channel.fetch_message(poll_message.id)
-        end_message = self.contest_end_message[guild_id]
-
-        if poll_message.poll:
-            answers = poll_message.poll.answers
-            max_votes = -1
-            winner_answers = []
-
-            for answer in answers:
-                if answer.vote_count > max_votes:
-                    max_votes = answer.vote_count
-                    winner_answers = [answer]
-                elif answer.vote_count == max_votes and max_votes > 0:
-                    winner_answers.append(answer)
-
-            if not winner_answers or max_votes == 0:
-                victory_message = end_message.replace("{user}", "nobody")
-
-            elif len(winner_answers) == 1:
-                winner_name = winner_answers[0].text
-                winner_user = nomination_map.get(winner_name)
-
-                if winner_user:
-                    victory_message = end_message.replace("{user}", winner_user.mention)
-                else:
-                    victory_message = end_message.replace("{user}", f"**{winner_name}**")
-            else:
-                winner_mentions = []
-                for answer in winner_answers:
-                    winning_user = nomination_map[answer.text]
-                    if winning_user:
-                        winner_mentions.append(winning_user.mention)
-                    else:
-                        winner_mentions.append(f"**{answer.text}**")
-                joined_mentions = ", ".join(winner_mentions[:-1]) + f"{"," if len(winner_mentions) > 2 else ""} and " + winner_mentions[-1]
-                victory_message = end_message.replace("{user}", joined_mentions)
-
-            await announcement_channel.send(victory_message.replace("{votes}", str(max_votes)))
+        asyncio.create_task(
+            self.finish_contest(
+                guild_id,
+                poll_channel,
+                poll_message.id,
+                announcement_channel,
+                nomination_map,
+            )
+        )
+        await interaction.response.send_message(
+            f"Popularity contest poll created in {poll_channel.mention}. Voting is open for one hour.",
+            ephemeral=True,
+        )
 
 
 
