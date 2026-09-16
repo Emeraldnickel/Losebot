@@ -1345,6 +1345,11 @@ class PopularityContest(commands.Cog):
         for i, user in enumerate(nominations):
             poll.add_answer(text=user.display_name, emoji=emojis[i])
 
+        if contest_role_id is not None:
+            contest_role = guild.get_role(contest_role_id) # pyright: ignore[reportArgumentType]
+            if contest_role is not None:
+                await poll_channel.send(f"{contest_role.mention}")
+
         poll_message = await poll_channel.send(poll=poll)
         asyncio.create_task(
             self.run_finish_contest(
