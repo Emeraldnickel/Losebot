@@ -691,7 +691,7 @@ class MinuteOfSilenceFeatures(commands.Cog):
 class PopularityContest(commands.Cog):
     def __init__(self, bot: commands.Bot | commands.AutoShardedBot, data_path: Path | None = None):
         self.bot = bot
-        self.data_path = data_path or Path(__file__).with_name("custom_react_actions.json") 
+        self.data_path = data_path or Path(__file__).with_name("popularity_contest.json")
         self.timeout_interval = 300  # In seconds
 
         # PERSISTENT VARIABLES
@@ -700,9 +700,98 @@ class PopularityContest(commands.Cog):
         self.announcement_ch_id: dict[int, int] = {}
         self.contest_role_id: dict[int, int | None] = {}
         self.contest_manager_roles: dict[int, set[int]] = {}
+        self.contest_exempt_roles: dict[int, set[int]] = {}
         self.contest_start_message: defaultdict = defaultdict(lambda: "A popularity contest has started! Nominate your choices now in {channel}!")
         self.contest_end_message: defaultdict = defaultdict(lambda: "The popularity contest has concluded! Your winner is... {user}!")
         self.member_role_id: dict[int, int | None] = {}
+
+        if self.data_path.is_file():
+            with self.data_path.open("r", encoding="utf-8") as data_file:
+                data = json.load(data_file)
+
+            self.nomination_ch_id = {
+                int(guild_id): channel_id
+                for guild_id, channel_id in data.get("nomination_ch_id", {}).items()
+            }
+            self.poll_ch_id = {
+                int(guild_id): channel_id
+                for guild_id, channel_id in data.get("poll_ch_id", {}).items()
+            }
+            self.announcement_ch_id = {
+                int(guild_id): channel_id
+                for guild_id, channel_id in data.get("announcement_ch_id", {}).items()
+            }
+            self.contest_role_id = {
+                int(guild_id): role_id
+                for guild_id, role_id in data.get("contest_role_id", {}).items()
+            }
+            self.contest_manager_roles = {
+                int(guild_id): set(role_ids)
+                for guild_id, role_ids in data.get("contest_manager_roles", {}).items()
+            }
+            self.contest_exempt_roles = {
+                int(guild_id): set(role_ids)
+                for guild_id, role_ids in data.get("contest_exempt_roles", {}).items()
+            }
+            self.contest_start_message.update(
+                {
+                    int(guild_id): message
+                    for guild_id, message in data.get("contest_start_message", {}).items()
+                }
+            )
+            self.contest_end_message.update(
+                {
+                    int(guild_id): message
+                    for guild_id, message in data.get("contest_end_message", {}).items()
+                }
+            )
+            self.member_role_id = {
+                int(guild_id): role_id
+                for guild_id, role_id in data.get("member_role_id", {}).items()
+            }
+
+    def save_data(self):
+        data = {
+            "nomination_ch_id": {
+                str(guild_id): channel_id
+                for guild_id, channel_id in self.nomination_ch_id.items()
+            },
+            "poll_ch_id": {
+                str(guild_id): channel_id
+                for guild_id, channel_id in self.poll_ch_id.items()
+            },
+            "announcement_ch_id": {
+                str(guild_id): channel_id
+                for guild_id, channel_id in self.announcement_ch_id.items()
+            },
+            "contest_role_id": {
+                str(guild_id): role_id
+                for guild_id, role_id in self.contest_role_id.items()
+            },
+            "contest_manager_roles": {
+                str(guild_id): sorted(role_ids)
+                for guild_id, role_ids in self.contest_manager_roles.items()
+            },
+            "contest_exempt_roles": {
+                str(guild_id): sorted(role_ids)
+                for guild_id, role_ids in self.contest_exempt_roles.items()
+            },
+            "contest_start_message": {
+                str(guild_id): message
+                for guild_id, message in self.contest_start_message.items()
+            },
+            "contest_end_message": {
+                str(guild_id): message
+                for guild_id, message in self.contest_end_message.items()
+            },
+            "member_role_id": {
+                str(guild_id): role_id
+                for guild_id, role_id in self.member_role_id.items()
+            },
+        }
+        self.data_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.data_path.open("w", encoding="utf-8") as data_file:
+            json.dump(data, data_file, indent=2)
 
     async def close_channel(self, guild: discord.Guild, channel: discord.TextChannel):
         everyone_role = guild.default_role
@@ -755,6 +844,7 @@ class PopularityContest(commands.Cog):
             )
             return
         self.nomination_ch_id[interaction.guild.id] = channel.id
+        self.save_data()
         await interaction.response.send_message(
             f"Set popularity contest nomination channel to {channel.mention}! Channel closed successfully."
         )
@@ -774,6 +864,7 @@ class PopularityContest(commands.Cog):
             )
             return
         self.poll_ch_id[interaction.guild.id] = channel.id
+        self.save_data()
         await interaction.response.send_message(
             f"Set popularity contest poll channel to {channel.mention}!"
         )
@@ -793,6 +884,7 @@ class PopularityContest(commands.Cog):
             )
             return
         self.announcement_ch_id[interaction.guild.id] = channel.id
+        self.save_data()
         await interaction.response.send_message(
             f"Set popularity contest winners' announcement channel to {channel.mention}!"
         )
@@ -816,12 +908,14 @@ class PopularityContest(commands.Cog):
             return
         if role is None:
             self.contest_role_id[interaction.guild.id] = None
+            self.save_data()
             await interaction.response.send_message(
                 "Removed popularity contest role.",
                 ephemeral=True
             )
             return
         self.contest_role_id[interaction.guild.id] = role.id
+        self.save_data()
         await interaction.response.send_message(
             f"Set {role.mention} as the popularity contest role to ping.",
             ephemeral=True,
@@ -844,9 +938,10 @@ class PopularityContest(commands.Cog):
             return
         if interaction.guild.id not in self.contest_manager_roles.keys():
             self.contest_manager_roles[interaction.guild.id] = set()
-        match action.upper:
+        match action.upper():
             case "ADD":
                 self.contest_manager_roles[interaction.guild.id].add(role.id)
+                self.save_data()
                 await interaction.response.send_message(
                     f"Added {role.mention} as a contest manager role.",
                     ephemeral=True,
@@ -855,6 +950,7 @@ class PopularityContest(commands.Cog):
             case "REMOVE":
                 if role.id in self.contest_manager_roles[interaction.guild.id]:
                     self.contest_manager_roles[interaction.guild.id].remove(role.id)
+                    self.save_data()
                     await interaction.response.send_message(
                         f"Removed {role.mention} as a contest manager role.",
                         ephemeral=True,
@@ -872,6 +968,51 @@ class PopularityContest(commands.Cog):
                     ephemeral=True,
                 )
                 return
+
+    @app_commands.command(name="contest_exempt_role", description="Manage roles whose members cannot be nominated in popularity contests.")
+    @app_commands.guild_only
+    async def contest_exempt_role(self, interaction: discord.Interaction, action: str, role: discord.Role):
+        if interaction.guild is None:
+            return
+        if (
+            not isinstance(interaction.user, discord.Member)
+            or not interaction.user.guild_permissions.administrator
+        ):
+            await interaction.response.send_message(
+                "Only server administrators can configure popularity contest roles.",
+                ephemeral=True,
+            )
+            return
+
+        if interaction.guild.id not in self.contest_exempt_roles:
+            self.contest_exempt_roles[interaction.guild.id] = set()
+
+        match action.upper():
+            case "ADD":
+                self.contest_exempt_roles[interaction.guild.id].add(role.id)
+                self.save_data()
+                await interaction.response.send_message(
+                    f"Added {role.mention} as a popularity contest exempt role.",
+                    ephemeral=True,
+                )
+            case "REMOVE":
+                if role.id in self.contest_exempt_roles[interaction.guild.id]:
+                    self.contest_exempt_roles[interaction.guild.id].remove(role.id)
+                    self.save_data()
+                    await interaction.response.send_message(
+                        f"Removed {role.mention} as a popularity contest exempt role.",
+                        ephemeral=True,
+                    )
+                else:
+                    await interaction.response.send_message(
+                        f"{role.mention} was already not a popularity contest exempt role, so nothing has been changed.",
+                        ephemeral=True,
+                    )
+            case _:
+                await interaction.response.send_message(
+                    "Invalid option! Valid options are ADD to add a role or REMOVE to remove a role as a popularity contest exempt role.",
+                    ephemeral=True,
+                )
 
     @app_commands.command(
         name="set_contest_start_message", 
@@ -891,6 +1032,7 @@ class PopularityContest(commands.Cog):
             )
             return
         self.contest_start_message[interaction.guild.id] = message
+        self.save_data()
         await interaction.response.send_message(
             f"Successfully changed popularity contest starting message.",
             ephemeral=True,
@@ -899,7 +1041,7 @@ class PopularityContest(commands.Cog):
 
     @app_commands.command(
         name="set_contest_end_message", 
-        description="Set the ending message for a popularity contest. Use {user} in place of the winning user."
+        description="Set the ending message for a popularity contest. Use {user} in place of the winning user/s and {votes} in place of the winning vote count."
         )
     @app_commands.guild_only
     async def set_contest_end_message(self, interaction: discord.Interaction, message: str):
@@ -914,7 +1056,8 @@ class PopularityContest(commands.Cog):
                 ephemeral=True,
             )
             return
-        self.contest_start_message[interaction.guild.id] = message
+        self.contest_end_message[interaction.guild.id] = message
+        self.save_data()
         await interaction.response.send_message(
             f"Successfully changed popularity contest ending message.",
             ephemeral=True,
@@ -939,6 +1082,7 @@ class PopularityContest(commands.Cog):
             )
             return
         self.member_role_id[interaction.guild.id] = None if role is None else role.id
+        self.save_data()
         await interaction.response.send_message(
             f"Successfully changed default member role.",
             ephemeral=True,
@@ -1051,6 +1195,15 @@ class PopularityContest(commands.Cog):
                     await nomination_channel.send(f"User {target_user.display_name} is already nominated!")
                     continue
 
+                exempt_role_ids = self.contest_exempt_roles.get(guild_id, set())
+                if isinstance(target_user, discord.Member) and any(
+                    role.id in exempt_role_ids for role in target_user.roles
+                ):
+                    await nomination_channel.send(
+                        f"User {target_user.display_name} cannot be nominated."
+                    )
+                    continue
+
                 nominations.append(target_user)
                 nomination_map[target_user.display_name] = target_user
                 remaining = max_nominations - len(nominations)
@@ -1129,7 +1282,7 @@ class PopularityContest(commands.Cog):
                 joined_mentions = ", ".join(winner_mentions[:-1]) + f"{"," if len(winner_mentions) > 2 else ""} and " + winner_mentions[-1]
                 victory_message = end_message.replace("{user}", joined_mentions)
 
-            await announcement_channel.send(victory_message)
+            await announcement_channel.send(victory_message.replace("{votes}", max_votes))
 
 
 
