@@ -891,7 +891,7 @@ class PopularityContest(commands.Cog):
 
     @app_commands.command(
             name="set_contest_ping", 
-            description="Set the role to ping when starting a popularity contest. Can also be no role, in which case leave the option blank."
+            description="Set the role to ping when starting a popularity contest. Can also be no role (leave the option blank)."
             )
     @app_commands.guild_only
     async def set_contest_ping(self, interaction: discord.Interaction, role: discord.Role | None = None):
@@ -1041,7 +1041,7 @@ class PopularityContest(commands.Cog):
 
     @app_commands.command(
         name="set_contest_end_message", 
-        description="Set the ending message for a popularity contest. Use {user} in place of the winning user/s and {votes} in place of the winning vote count."
+        description="Set the ending message for a popularity contest. Use {user} for user/s and {votes} for vote amount."
         )
     @app_commands.guild_only
     async def set_contest_end_message(self, interaction: discord.Interaction, message: str):
@@ -1066,7 +1066,7 @@ class PopularityContest(commands.Cog):
 
     @app_commands.command(
             name="set_member_role",
-            description="Set the default server member role. Necessary to close and open the nomination channel properly. No role means no default member role."
+            description="Set the default server member role. No role means no default member role."
     )
     @app_commands.guild_only
     async def set_member_role(self, interaction:discord.Interaction, role: discord.Role | None = None):
