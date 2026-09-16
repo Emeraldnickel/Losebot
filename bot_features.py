@@ -687,6 +687,42 @@ class MinuteOfSilenceFeatures(commands.Cog):
                 datetime.timedelta(minutes=duration), reason="Muted for minute/s of silence"
             )
 
+class PopularityContest(commands.Cog):
+    def __init__(self, bot: commands.Bot | commands.AutoShardedBot, data_path: Path | None = None):
+       self.bot = bot
+       self.data_path = data_path or Path(__file__).with_name("custom_react_actions.json") 
+
+       self.nomination_ch_id: int | None = None
+       self.poll_ch_id: int | None = None
+       self.announcement_ch_id: int | None = None
+       self.max_nominations: int = 10
+
+    @app_commands.command(name="set_nomination_channel", description="Set the channel to nominate the weekly winner in.")
+    @app_commands.guild_only
+    async def set_nomination_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        self.nomination_ch_id = channel.id
+        await interaction.response.send_message(
+            f"Set popularity contest nomination channel to {channel.mention}!"
+        )
+
+    @app_commands.command(name="set_poll_channel", description="Set the channel to send the popularity contest poll in.")
+    @app_commands.guild_only
+    async def set_poll_channel(self, interaction:discord.Interaction, channel: discord.TextChannel):
+        self.poll_ch_id = channel.id
+        await interaction.response.send_message(
+            f"Set popularity contest poll channel to {channel.mention}!"
+        )
+
+    @app_commands.command(name="set_announcement_channel", description="Set the channel to announce the popularity contest winner in.")
+    @app_commands.guild_only
+    async def set_announcement_channel(self, interaction:discord.Interaction, channel:discord.TextChannel):
+        self.announcement_ch_id = channel.id
+        await interaction.response.send_message(
+            f"Set popularity contest winners' announcement channel to {channel.mention}!"
+        )
+
+    
+
 
 class HammerFeatures(commands.Cog):
     def __init__(self, bot: commands.Bot, thresholds_path: Path):
