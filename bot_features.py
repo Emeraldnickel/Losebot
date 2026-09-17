@@ -704,6 +704,10 @@ class PopularityContest(commands.Cog):
         self.contest_start_message: defaultdict = defaultdict(lambda: "A popularity contest has started! Nominate your choices now in {channel}!")
         self.contest_end_message: defaultdict = defaultdict(lambda: "The popularity contest has concluded! Your winner is... {user}!")
         self.member_role_id: dict[int, int | None] = {}
+        self.active_contests: set[int] = set()
+        self.nomination_controls: dict[int, asyncio.Event] = {}
+        self.contest_tasks: dict[int, asyncio.Task[None]] = {}
+        self.cancelled_contests: set[int] = set()
 
         if self.data_path.is_file():
             print("Fetching popularity contest vars from file...")
@@ -802,7 +806,14 @@ class PopularityContest(commands.Cog):
         if member_id is not None:
             member_role = guild.get_role(member_id)
             if member_role is not None:
+                if not channel.permissions_for(member_role).view_channel:
+                    await channel.send("Members cannot see this channel; locking not performed.")
+                    return
                 await channel.set_permissions(member_role, send_messages=False)
+                return
+        if not channel.permissions_for(everyone_role).view_channel:
+            await channel.send("Server members cannot see this channel; locking not performed.")
+            return
         await channel.set_permissions(everyone_role, send_messages=False)
         await channel.send("This channel is now locked.")
 
@@ -812,7 +823,13 @@ class PopularityContest(commands.Cog):
         if member_id is not None:
             member_role = guild.get_role(member_id)
             if member_role is not None:
+                if not channel.permissions_for(member_role).view_channel:
+                    await channel.send("Members cannot see this channel; unlocking not performed.")
+                    return
                 await channel.set_permissions(member_role, send_messages=True)
+        if not channel.permissions_for(everyone_role).view_channel:
+            await channel.send("Server members cannot see this channel; locking not performed.")
+            return
         await channel.set_permissions(everyone_role, send_messages=True)
         await channel.send("Channel unlocked!")
 
@@ -1186,6 +1203,72 @@ class PopularityContest(commands.Cog):
             )
         except discord.HTTPException as error:
             print(f"Failed to finish popularity contest for guild {guild_id}: {error}")
+        finally:
+            self.contest_tasks.pop(guild_id, None)
+            self.active_contests.discard(guild_id)
+            self.cancelled_contests.discard(guild_id)
+
+    def has_manager_role(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild_id is None or not isinstance(interaction.user, discord.Member):
+            return False
+        manager_roles = self.contest_manager_roles.get(interaction.guild_id, set())
+        return any(role.id in manager_roles for role in interaction.user.roles)
+
+    @app_commands.command(name="end_nominations", description="End the active popularity contest nominations early.")
+    @app_commands.guild_only
+    async def end_nominations(self, interaction: discord.Interaction):
+        if not self.has_manager_role(interaction):
+            await interaction.response.send_message(
+                "You don't have a role that allows you to manage popularity contest nominations!",
+                ephemeral=True,
+            )
+            return
+
+        guild_id = interaction.guild_id
+        if guild_id not in self.nomination_controls:
+            await interaction.response.send_message(
+                "There is no active nomination period to end.",
+                ephemeral=True,
+            )
+            return
+
+        self.nomination_controls[guild_id].set()
+        await interaction.response.send_message(
+            "Popularity contest nominations will end shortly.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="cancel_popularity_contest", description="Cancel the active popularity contest.")
+    @app_commands.guild_only
+    async def cancel_popularity_contest(self, interaction: discord.Interaction):
+        if not self.has_manager_role(interaction):
+            await interaction.response.send_message(
+                "You don't have a role that allows you to cancel popularity contests!",
+                ephemeral=True,
+            )
+            return
+
+        guild_id = interaction.guild_id
+        if guild_id not in self.active_contests:
+            await interaction.response.send_message(
+                "There is no active popularity contest to cancel.",
+                ephemeral=True,
+            )
+            return
+
+        self.cancelled_contests.add(guild_id)
+        nomination_control = self.nomination_controls.get(guild_id)
+        if nomination_control is not None:
+            nomination_control.set()
+
+        contest_task = self.contest_tasks.get(guild_id)
+        if contest_task is not None:
+            contest_task.cancel()
+
+        await interaction.response.send_message(
+            "Popularity contest cancelled.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="popularity_contest", description="Start a popularity contest.")
     @app_commands.guild_only
@@ -1195,6 +1278,13 @@ class PopularityContest(commands.Cog):
             return
         guild_id = guild.id
         await interaction.response.defer(ephemeral=True)
+
+        if guild_id in self.active_contests:
+            await interaction.followup.send(
+                "There is already an active popularity contest in this server.",
+                ephemeral=True,
+            )
+            return
 
         manager_roles = self.contest_manager_roles.get(guild_id, None)
         if not manager_roles:
@@ -1278,16 +1368,23 @@ class PopularityContest(commands.Cog):
         await announcement_channel.send(message)
 
         # 2: Open nomination channel, start listening for messages and adding to nominated users list
+        self.active_contests.add(guild_id)
+        nomination_control = asyncio.Event()
+        self.nomination_controls[guild_id] = nomination_control
         try:
             await self.open_channel(guild, nomination_channel)
             await nomination_channel.send("Nominations are open! Please **@mention** a user to nominate them.")
         except discord.Forbidden:
+            self.nomination_controls.pop(guild_id, None)
+            self.active_contests.discard(guild_id)
             await interaction.followup.send(
                 "Couldn't open the nominations channel properly; I might not have the correct permissions!",
                 ephemeral=True,
             )
             return
         except discord.HTTPException as e:
+            self.nomination_controls.pop(guild_id, None)
+            self.active_contests.discard(guild_id)
             await interaction.followup.send(
                 f"Something went wrong! API error is as follows: {e}",
                 ephemeral=True,
@@ -1304,8 +1401,32 @@ class PopularityContest(commands.Cog):
                     return True
                 return False
 
+            wait_task = asyncio.create_task(
+                self.bot.wait_for("message", check=check, timeout=self.timeout_interval)
+            )
+            control_task = asyncio.create_task(nomination_control.wait())
+            done, pending = await asyncio.wait(
+                {wait_task, control_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for pending_task in pending:
+                pending_task.cancel()
+
             try:
-                message = await self.bot.wait_for('message', check=check, timeout=self.timeout_interval)
+                if control_task in done:
+                    if guild_id in self.cancelled_contests:
+                        await nomination_channel.send("Popularity contest cancelled.")
+                        self.nomination_controls.pop(guild_id, None)
+                        try:
+                            await self.close_channel(guild, nomination_channel)
+                        except discord.HTTPException:
+                            pass
+                        self.active_contests.discard(guild_id)
+                        self.cancelled_contests.discard(guild_id)
+                        return
+                    break
+
+                message = wait_task.result()
 
                 target_user = message.mentions[0]
                 if target_user.id in [u.id for u in nominations]:
@@ -1341,6 +1462,17 @@ class PopularityContest(commands.Cog):
                 await nomination_channel.send(f"Timeout period of {self.timeout_interval} seconds has elapsed.")
                 break
 
+        self.nomination_controls.pop(guild_id, None)
+        if guild_id in self.cancelled_contests:
+            await nomination_channel.send("Popularity contest cancelled.")
+            try:
+                await self.close_channel(guild, nomination_channel)
+            except discord.HTTPException:
+                pass
+            self.active_contests.discard(guild_id)
+            self.cancelled_contests.discard(guild_id)
+            return
+
         await nomination_channel.send(f"{len(nominations)} nominations have been collected. Now creating poll in {poll_channel.mention}...")
 
         try:
@@ -1355,6 +1487,14 @@ class PopularityContest(commands.Cog):
                 f"Something went wrong! API error is as follows: {e}",
                 ephemeral=True,
             )
+
+        if not nominations:
+            await interaction.followup.send(
+                "No nominations were collected, so no poll was created.",
+                ephemeral=True,
+            )
+            self.active_contests.discard(guild_id)
+            return
 
         # 3: Create poll and wait
 
@@ -1375,7 +1515,7 @@ class PopularityContest(commands.Cog):
                 await poll_channel.send(f"{contest_role.mention}")
 
         poll_message = await poll_channel.send(poll=poll)
-        asyncio.create_task(
+        contest_task = asyncio.create_task(
             self.run_finish_contest(
                 guild_id,
                 poll_channel,
@@ -1384,6 +1524,13 @@ class PopularityContest(commands.Cog):
                 nomination_map,
             )
         )
+        self.contest_tasks[guild_id] = contest_task
+        if guild_id in self.cancelled_contests:
+            contest_task.cancel()
+            self.contest_tasks.pop(guild_id, None)
+            self.active_contests.discard(guild_id)
+            self.cancelled_contests.discard(guild_id)
+            return
         await interaction.followup.send(
             f"Popularity contest poll created in {poll_channel.mention}. Voting is open for one hour.",
             ephemeral=True,
