@@ -269,7 +269,7 @@ class CustomReactionActions(commands.Cog):
                 response = response_message or default_response
                 if response:
                     await message.reply(
-                        response.replace("{user}", author.display_name)
+                        response.replace("{user}", author.mention)
                     )
         except discord.Forbidden:
             if message is not None:
