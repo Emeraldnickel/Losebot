@@ -1536,8 +1536,37 @@ class PopularityContest(commands.Cog):
             ephemeral=True,
         )
 
+class MiscActions(commands.Cog):
+    def __init__(self, bot: commands.Bot | commands.AutoShardedBot) -> None:
+        self.bot = bot
 
 
+    @app_commands.command(name="say", description="Make the bot say something.")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def say(self, interaction:discord.Interaction, message: str, channel: discord.TextChannel, reply_message_id: str | None = None) -> None:
+        if reply_message_id is None:
+            await channel.send(message)
+        else:
+            try:
+                reply_id = int(reply_message_id)
+            except ValueError:
+                await interaction.response.send_message("Invalid reply message ID.", ephemeral=True)
+                return
+            reply_message = await channel.fetch_message(reply_id)
+            if reply_message is None:
+                await interaction.response.send_message("Invalid reply message ID.", ephemeral=True)
+                return
+            await reply_message.reply(message)
+        await interaction.response.send_message(f"Sent message in {channel.mention}.", ephemeral=True)
+
+    @say.error
+    async def say_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        if isinstance(error, app_commands.errors.MissingPermissions):
+            await interaction.response.send_message("Only admins can run this command.", ephemeral=True)
+
+
+# DEPRECATED
 class HammerFeatures(commands.Cog):
     def __init__(self, bot: commands.Bot, thresholds_path: Path):
         self.bot = bot

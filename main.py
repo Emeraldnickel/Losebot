@@ -4,7 +4,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
-from bot_features import CustomReactionActions, HammerFeatures, MinuteOfSilenceFeatures, PopularityContest
+from bot_features import CustomReactionActions, HammerFeatures, MinuteOfSilenceFeatures, PopularityContest, MiscActions
 
 use_shards = False
 
@@ -39,6 +39,9 @@ if use_shards:
             await self.add_cog(
                 PopularityContest(self, Path(__file__).with_name("popularity_contest.json"))
             )
+            await self.add_cog(
+                MiscActions(self)
+            )
             await self.tree.sync()
 
         async def close(self):
@@ -72,6 +75,9 @@ else:
                 )
                 await self.add_cog(
                     PopularityContest(self, Path(__file__).with_name("popularity_contest.json"))
+                )
+                await self.add_cog(
+                    MiscActions(self)
                 )
                 await self.tree.sync()
     
