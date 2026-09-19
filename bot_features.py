@@ -1545,6 +1545,7 @@ class MiscActions(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
     async def say(self, interaction:discord.Interaction, message: str, channel: discord.TextChannel | None, reply_message_id: str | None = None) -> None:
+        print(f"{interaction.user.name} with id {interaction.user.id} used /say with message {message}")
         if channel is None:
             if not isinstance(interaction.channel, discord.TextChannel):
                 await interaction.response.send_message("Specify (or use this command in) a normal text channel!", ephemeral=True)
