@@ -1544,7 +1544,13 @@ class MiscActions(commands.Cog):
     @app_commands.command(name="say", description="Make the bot say something.")
     @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
-    async def say(self, interaction:discord.Interaction, message: str, channel: discord.TextChannel, reply_message_id: str | None = None) -> None:
+    async def say(self, interaction:discord.Interaction, message: str, channel: discord.TextChannel | None, reply_message_id: str | None = None) -> None:
+        if channel is None:
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message("Specify (or use this command in) a normal text channel!", ephemeral=True)
+                return
+            channel = interaction.channel
+
         if reply_message_id is None:
             await channel.send(message)
         else:
