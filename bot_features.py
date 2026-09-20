@@ -810,6 +810,7 @@ class PopularityContest(commands.Cog):
                     await channel.send("Members cannot see this channel; locking not performed.")
                     return
                 await channel.set_permissions(member_role, send_messages=False)
+                await channel.send("This channel is now locked.")
                 return
         if not channel.permissions_for(everyone_role).view_channel:
             await channel.send("Server members cannot see this channel; locking not performed.")
@@ -827,6 +828,8 @@ class PopularityContest(commands.Cog):
                     await channel.send("Members cannot see this channel; unlocking not performed.")
                     return
                 await channel.set_permissions(member_role, send_messages=True)
+                await channel.send("Channel unlocked!")
+                return
         if not channel.permissions_for(everyone_role).view_channel:
             await channel.send("Server members cannot see this channel; locking not performed.")
             return
@@ -1541,11 +1544,37 @@ class MiscActions(commands.Cog):
         self.bot = bot
 
 
+    def _set_password(self, user: discord.Member, guild: discord.Guild, password: str, old_password: str) -> bool:
+        current_password = os.environ.get("PROTECT_PASSWORD")
+        if old_password == current_password:
+            os.environ["PROTECT_PASSWORD"] = password
+            return True
+        return False
+
+    def _get_password(self) -> str | None:
+        return os.environ.get("PROTECT_PASSWORD")
+
+    # @app_commands.command(name="set_protection_password", description="Set the password for password-protected actions.")
+    # @app_commands.default_permissions(administrator=True)
+    # @app_commands.checks.has_permissions(administrator=True)
+    # async def set_protection_password(self, interaction: discord.Interaction, password: str, old_password: str) -> None:
+    #     if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+    #         await interaction.response.send_message("This command only works in servers.", ephemeral=True)
+    #         return
+    #     status = self._set_password(interaction.user, interaction.guild, password, old_password)
+    #     if not status:
+    #         await interaction.response.send_message("Password mismatch. This action has been logged.")
+    #         print(f"Failed password change from user {interaction.user.id} with name {interaction.user.name}. Attempted to use password '{old_password}'.")
+    #         return
+    #     await interaction.response.send_message("Changed password successfully.")
+
+
     @app_commands.command(name="say", description="Make the bot say something.")
     @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
     async def say(self, interaction:discord.Interaction, message: str, channel: discord.TextChannel | None, reply_message_id: str | None = None) -> None:
-        print(f"{interaction.user.name} with id {interaction.user.id} used /say with message {message}")
+        with open("saylog.log", "a") as f:
+            print(f"{interaction.user.name} with id {interaction.user.id} used /say with message {message}", file=f)
         if channel is None:
             if not isinstance(interaction.channel, discord.TextChannel):
                 await interaction.response.send_message("Specify (or use this command in) a normal text channel!", ephemeral=True)
