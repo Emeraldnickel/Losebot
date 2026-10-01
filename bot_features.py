@@ -692,7 +692,6 @@ class PopularityContest(commands.Cog):
     def __init__(self, bot: commands.Bot | commands.AutoShardedBot, data_path: Path | None = None):
         self.bot = bot
         self.data_path = data_path or Path(__file__).with_name("popularity_contest.json")
-        self.timeout_interval = 300  # In seconds
 
         # PERSISTENT VARIABLES
         self.nomination_ch_id: dict[int, int] = {}
@@ -933,7 +932,7 @@ class PopularityContest(commands.Cog):
         self.save_data()
         await interaction.response.send_message(
             f"Set popularity contest winners' announcement channel to {channel.mention}!",
-            ephemeral=true
+            ephemeral=True
         )
 
     @app_commands.command(
@@ -1143,8 +1142,9 @@ class PopularityContest(commands.Cog):
         poll_message_id: int,
         announcement_channel: discord.TextChannel,
         nomination_map: dict[str, discord.User | discord.Member],
+        poll_duration: int  # in seconds
     ):
-        await asyncio.sleep(3610)
+        await asyncio.sleep(poll_duration + 10)
 
         poll_message = await poll_channel.fetch_message(poll_message_id)
         end_message = self.contest_end_message[guild_id]
@@ -1195,6 +1195,7 @@ class PopularityContest(commands.Cog):
         poll_message_id: int,
         announcement_channel: discord.TextChannel,
         nomination_map: dict[str, discord.User | discord.Member],
+        poll_duration: int  # in seconds
     ):
         try:
             await self.finish_contest(
@@ -1203,6 +1204,7 @@ class PopularityContest(commands.Cog):
                 poll_message_id,
                 announcement_channel,
                 nomination_map,
+                poll_duration
             )
         except discord.HTTPException as error:
             print(f"Failed to finish popularity contest for guild {guild_id}: {error}")
@@ -1274,13 +1276,31 @@ class PopularityContest(commands.Cog):
         )
 
     @app_commands.command(name="popularity_contest", description="Start a popularity contest.")
+    @app_commands.describe(
+        max_nominations = "The maximum number of nominations for the popularity contest (max of 10; 10 by default)",
+        timeout_interval = "The number of seconds to wait for nominations before closing nominations (None by default)",
+        nomination_max_time = "The maximum time (in minutes) for nominations to be open (None by default)",
+        poll_length = "The length in hours (1, 4, 8, or 24) for the contest poll to run (1 by default)"
+    )
     @app_commands.guild_only
-    async def popularity_contest(self, interaction:discord.Interaction, max_nominations: int = 10):
+    async def popularity_contest(self, interaction:discord.Interaction, 
+                                 max_nominations: int = 10, 
+                                 timeout_interval: int | None = None,
+                                 nomination_max_time: int | None = None, 
+                                 poll_length: int = 1):
         guild = interaction.guild
         if guild is None: 
             return
         guild_id = guild.id
         await interaction.response.defer(ephemeral=True)
+
+        valid_poll_lengths = [1, 4, 8, 24]
+        if poll_length not in valid_poll_lengths:
+            await interaction.followup.send(
+                "Cannot make a poll with this length in hours; please choose a valid length (1, 4, 8, or 24 hours).",
+                ephemeral=True,
+            )
+            return
 
         if guild_id in self.active_contests:
             await interaction.followup.send(
@@ -1311,6 +1331,13 @@ class PopularityContest(commands.Cog):
             await interaction.followup.send(
                 "The valid range of max nominations is 1-10.",
                 ephemeral=True
+            )
+            return
+
+        if nomination_max_time is not None and nomination_max_time < 1:
+            await interaction.followup.send(
+                "The maximum nomination time must be at least 1 minute.",
+                ephemeral=True,
             )
             return
 
@@ -1394,6 +1421,11 @@ class PopularityContest(commands.Cog):
             )
             return
 
+        nomination_deadline = (
+            asyncio.get_running_loop().time() + nomination_max_time * 60
+            if nomination_max_time is not None
+            else None
+        )
         nominations = []
         nomination_map: dict[str, discord.User | discord.Member] = {}
         while len(nominations) < max_nominations:
@@ -1404,8 +1436,18 @@ class PopularityContest(commands.Cog):
                     return True
                 return False
 
+            wait_timeout = timeout_interval
+            deadline_limited_wait = False
+            if nomination_deadline is not None:
+                remaining_time = nomination_deadline - asyncio.get_running_loop().time()
+                if remaining_time <= 0:
+                    break
+                if wait_timeout is None or remaining_time <= wait_timeout:
+                    wait_timeout = remaining_time
+                    deadline_limited_wait = True
+
             wait_task = asyncio.create_task(
-                self.bot.wait_for("message", check=check, timeout=self.timeout_interval)
+                self.bot.wait_for("message", check=check, timeout=wait_timeout)
             )
             control_task = asyncio.create_task(nomination_control.wait())
             done, pending = await asyncio.wait(
@@ -1462,7 +1504,14 @@ class PopularityContest(commands.Cog):
                 if remaining > 0:
                     await nomination_channel.send(f"Remaining nominations available: {remaining} more members.")
             except asyncio.TimeoutError:
-                await nomination_channel.send(f"Timeout period of {self.timeout_interval} seconds has elapsed.")
+                if deadline_limited_wait:
+                    await nomination_channel.send(
+                        f"Maximum nomination period of {nomination_max_time} minutes has elapsed."
+                    )
+                else:
+                    await nomination_channel.send(
+                        f"Timeout period of {timeout_interval} seconds has elapsed."
+                    )
                 break
 
         self.nomination_controls.pop(guild_id, None)
@@ -1503,7 +1552,7 @@ class PopularityContest(commands.Cog):
 
         poll = discord.Poll(
             question="Who will win?",
-            duration=datetime.timedelta(hours=1),
+            duration=datetime.timedelta(hours=poll_length),
             multiple=False
         )
 
@@ -1525,6 +1574,7 @@ class PopularityContest(commands.Cog):
                 poll_message.id,
                 announcement_channel,
                 nomination_map,
+                poll_length*3600
             )
         )
         self.contest_tasks[guild_id] = contest_task
