@@ -1275,6 +1275,59 @@ class PopularityContest(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="contest_config", description="List the configuration for popularity contests in this server.")
+    @app_commands.guild_only
+    async def contest_config(self, interaction:discord.Interaction):
+        guild = interaction.guild
+        if guild is None:
+            return
+        if (
+            not isinstance(interaction.user, discord.Member)
+            or not interaction.user.guild_permissions.administrator
+        ):
+            await interaction.response.send_message(
+                "Only server administrators can retrieve contest configuration.",
+                ephemeral=True,
+            )
+            return
+
+        guild_id = guild.id
+
+        def get_channel(guild: discord.Guild, ch_id: int | None) -> str:
+            if ch_id is None:
+                return "Not yet configured."
+            channel = guild.get_channel(ch_id)
+            if channel is None:
+                return "Improperly configured."
+            return channel.mention
+
+        def get_roles(guild: discord.Guild, role_id: int | set[int] | None) -> str:
+            if role_id is None:
+                return "None (or not yet configured)."
+            if isinstance(role_id, set):
+                roles = ""
+                for r_id in role_id:
+                    role = guild.get_role(r_id)
+                    if roles != "":
+                        roles += ", "
+                    roles += "(Invalid role from saved ID)" if role is None else role.mention
+                return roles
+            role = guild.get_role(role_id)
+            return "Improperly configured role." if role is None else role.mention
+
+        await interaction.response.send_message(
+            f"""*CONFIGURATION FOR THIS GUILD:*
+Nomination channel: {get_channel(guild, self.nomination_ch_id.get(guild_id))}
+Poll channel: {get_channel(guild, self.poll_ch_id.get(guild_id))}
+Announcement channel: {get_channel(guild, self.announcement_ch_id.get(guild_id))}
+Contest role ID: {get_roles(guild, self.contest_role_id.get(guild_id))}
+Contest manager roles: {get_roles(guild, self.contest_manager_roles.get(guild_id))}
+Contest exempt roles: {get_roles(guild, self.contest_exempt_roles.get(guild_id))}
+Contest start message: '{self.contest_start_message[guild_id]}'
+Contest end message: '{self.contest_end_message[guild_id]}'
+Configured member role for this server: {get_roles(guild, self.member_role_id.get(guild_id))}""", ephemeral=True
+        )
+
     @app_commands.command(name="popularity_contest", description="Start a popularity contest.")
     @app_commands.describe(
         max_nominations = "The maximum number of nominations for the popularity contest (max of 10; 10 by default)",
