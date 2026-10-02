@@ -1316,7 +1316,7 @@ class PopularityContest(commands.Cog):
             return "Improperly configured role." if role is None else role.mention
 
         await interaction.response.send_message(
-            f"""*CONFIGURATION FOR THIS GUILD:*
+            f"""**CONFIGURATION FOR THIS GUILD:**
 Nomination channel: {get_channel(guild, self.nomination_ch_id.get(guild_id))}
 Poll channel: {get_channel(guild, self.poll_ch_id.get(guild_id))}
 Announcement channel: {get_channel(guild, self.announcement_ch_id.get(guild_id))}
