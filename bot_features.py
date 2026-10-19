@@ -1479,7 +1479,7 @@ Configured member role for this server: {get_roles(guild, self.member_role_id.ge
             if nomination_max_time is not None
             else None
         )
-        nominations = []
+        nominations: list[tuple[discord.User | discord.Member, discord.User | discord.Member]] = []  # Tuples of (nominated user, nominator)
         nomination_map: dict[str, discord.User | discord.Member] = {}
         while len(nominations) < max_nominations:
             def check(m: discord.Message):
@@ -1527,8 +1527,12 @@ Configured member role for this server: {get_roles(guild, self.member_role_id.ge
                 message = wait_task.result()
 
                 target_user = message.mentions[0]
-                if target_user.id in [u.id for u in nominations]:
-                    await nomination_channel.send(f"User {target_user.display_name} is already nominated!")
+                if target_user.id in [u[0].id for u in nominations]:
+                    await nomination_channel.send(f"User '{target_user.display_name}' is already nominated!")
+                    continue
+
+                if message.author.id in [u[1].id for u in nominations]:
+                    await nomination_channel.send(f"You have already nominated someone!")
                     continue
 
                 if target_user.display_name in nomination_map.keys():
@@ -1548,7 +1552,7 @@ Configured member role for this server: {get_roles(guild, self.member_role_id.ge
                     )
                     continue
 
-                nominations.append(target_user)
+                nominations.append((target_user, message.author))
                 nomination_map[target_user.display_name] = target_user
                 remaining = max_nominations - len(nominations)
 
@@ -1611,7 +1615,7 @@ Configured member role for this server: {get_roles(guild, self.member_role_id.ge
 
         emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
-        for i, user in enumerate(nominations):
+        for i, (user, _) in enumerate(nominations):
             poll.add_answer(text=user.display_name, emoji=emojis[i])
 
         if contest_role_id is not None:
