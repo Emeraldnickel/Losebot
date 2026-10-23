@@ -128,6 +128,112 @@ def make_gif(text, out=None, font_path=None, size=47, frames=5, step=2, ms=50,
     return gif
 
 
+def make_watermarked_gif(text, scale=4, watermark="watermark",
+                         watermark_opacity=120, out=None, **gif_options):
+    if scale < 1:
+        raise ValueError("scale must be at least 1")
+
+    source = make_gif(text, **gif_options)
+    source_gif = Image.open(source)
+    width, height = source_gif.size
+    output_size = (width * scale, height * scale)
+
+    font_size = max(1, height * scale // 2)
+    font = None
+    for font_path in (gif_options.get("font_path"), *DEFAULT_FONTS):
+        if not font_path:
+            continue
+        try:
+            font = ImageFont.truetype(font_path, font_size)
+            break
+        except OSError:
+            continue
+    if font is None:
+        font = ImageFont.load_default(size=font_size)
+
+    stroke_width = max(1, font_size // 24)
+    measure = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    bounds = measure.textbbox((0, 0), watermark, font=font, stroke_width=stroke_width)
+    text_width = bounds[2] - bounds[0]
+    text_height = bounds[3] - bounds[1]
+    text_padding = stroke_width + 2
+    text_layer = Image.new(
+        "RGBA",
+        (text_width + 2 * text_padding, text_height + 2 * text_padding),
+    )
+    text_position = (text_padding - bounds[0], text_padding - bounds[1])
+    watermark_draw = ImageDraw.Draw(text_layer)
+    watermark_draw.text(
+        text_position,
+        watermark,
+        font=font,
+        fill=(255, 255, 255, watermark_opacity),
+        stroke_width=stroke_width,
+        stroke_fill=(0, 0, 0, watermark_opacity),
+    )
+    rotated = text_layer.rotate(25, resample=Image.Resampling.BICUBIC, expand=True)
+    rotated = rotated.crop(rotated.getchannel("A").getbbox())
+    margin = max(1, min(output_size) // 40)
+    fit_scale = min(
+        1,
+        (output_size[0] - 2 * margin) / rotated.width,
+        (output_size[1] - 2 * margin) / rotated.height,
+    )
+    if fit_scale < 1:
+        fitted_size = (
+            max(1, round(rotated.width * fit_scale)),
+            max(1, round(rotated.height * fit_scale)),
+        )
+        rotated = rotated.resize(fitted_size, Image.Resampling.LANCZOS)
+
+    watermark_layer = Image.new("RGBA", output_size)
+    watermark_layer.alpha_composite(
+        rotated,
+        ((output_size[0] - rotated.width) // 2, (output_size[1] - rotated.height) // 2),
+    )
+
+    indexed_frames = []
+    durations = []
+    frame_count = getattr(source_gif, "n_frames", 1)
+    for frame_number in range(frame_count):
+        source_gif.seek(frame_number)
+        durations.append(source_gif.info.get("duration", 50))
+        frame = source_gif.convert("RGBA").resize(output_size, Image.Resampling.NEAREST)
+        source_alpha = np.asarray(frame.getchannel("A"))
+        frame = Image.alpha_composite(frame, watermark_layer)
+        indexed = frame.convert("RGB").quantize(colors=255, method=Image.Quantize.MEDIANCUT)
+        palette = indexed.getpalette() or []
+        alpha = np.asarray(frame.getchannel("A")).copy()
+        watermark_alpha = np.asarray(watermark_layer.getchannel("A"))
+        watermark_over_transparency = (source_alpha < 128) & (watermark_alpha > 0)
+        alpha[watermark_over_transparency] = 255
+        indexed_pixels = np.asarray(indexed).copy()
+        indexed_pixels[alpha < 128] = TRANS_IDX
+        indexed = Image.fromarray(indexed_pixels.astype(np.uint8), "P")
+        indexed.putpalette(palette[:765] + [0, 0, 0])
+        indexed_frames.append(indexed)
+
+    result = BytesIO()
+    indexed_frames[0].save(
+        result,
+        format="GIF",
+        save_all=True,
+        append_images=indexed_frames[1:],
+        duration=durations,
+        loop=source_gif.info.get("loop", 0),
+        disposal=2,
+        transparency=TRANS_IDX,
+    )
+    result.seek(0)
+
+    if out is not None:
+        with open(out, "wb") as output_file:
+            output_file.write(result.getbuffer())
+        print(f"Saved {out} ({output_size[0]}x{output_size[1]}, {len(indexed_frames)} frames)")
+
+    return result
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("text")

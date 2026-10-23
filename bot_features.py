@@ -6,7 +6,7 @@ from pathlib import Path
 from enum import Enum, auto
 from collections import defaultdict
 
-from fire_text import make_gif
+from fire_text import make_watermarked_gif
 
 import discord
 from discord import app_commands
@@ -1723,6 +1723,9 @@ class MiscActions(commands.Cog):
         if size > 200:
             await interaction.response.send_message("Too large! Font size must be 200 or less.", ephemeral=True)
             return
+        if len(text) > 50:
+            await interaction.response.send_message("Text too long! Maximum length is 50 characters.", ephemeral=True)
+            return
         if font:
             font_path = Path(f"fonts/{font}.ttf")
             if not font_path.is_file():
@@ -1732,7 +1735,7 @@ class MiscActions(commands.Cog):
             font_path = None
         await interaction.response.defer(thinking=True)
 
-        gif = make_gif(text, font_path=font_path, size=size)
+        gif = make_watermarked_gif(text, watermark="stupid fucking watermark", font_path=font_path, size=size)
         await interaction.followup.send(file=discord.File(gif, filename="fire.gif"))
 
 # DEPRECATED
