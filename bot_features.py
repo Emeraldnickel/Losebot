@@ -6,6 +6,8 @@ from pathlib import Path
 from enum import Enum, auto
 from collections import defaultdict
 
+from fire_text import make_gif
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -1708,6 +1710,30 @@ class MiscActions(commands.Cog):
         if isinstance(error, app_commands.errors.MissingPermissions):
             await interaction.response.send_message("Only admins can run this command.", ephemeral=True)
 
+    @app_commands.command(name="fire_text", description="Make a fire GIF from text.")
+    @app_commands.describe(
+        text="The text to make into a fire GIF.",
+        font="The font to use for the text (optional). Default is Agate",
+        size="The font size in pixels (default is 47)"
+    )
+    async def fire_text(self, interaction: discord.Interaction, text: str, font: str | None = None, size: int = 47):
+        if size <= 0:
+            await interaction.response.send_message("Font size must be a positive integer.", ephemeral=True)
+            return
+        if size > 200:
+            await interaction.response.send_message("Too large! Font size must be 200 or less.", ephemeral=True)
+            return
+        if font:
+            font_path = Path(f"fonts/{font}.ttf")
+            if not font_path.is_file():
+                await interaction.response.send_message(f"Font file '{font}' not found.", ephemeral=True)
+                return
+        else:
+            font_path = None
+        await interaction.response.defer(thinking=True)
+
+        gif = make_gif(text, font_path=font_path, size=size)
+        await interaction.followup.send(file=discord.File(gif, filename="fire.gif"))
 
 # DEPRECATED
 class HammerFeatures(commands.Cog):
