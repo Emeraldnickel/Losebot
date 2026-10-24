@@ -1714,9 +1714,10 @@ class MiscActions(commands.Cog):
     @app_commands.describe(
         text="The text to make into a fire GIF.",
         font="The font to use for the text (optional). Default is Agate",
-        size="The font size in pixels (default is 47)"
+        size="The font size in pixels (default is 47)",
+        private="Whether to send the GIF privately (default is False)"
     )
-    async def fire_text(self, interaction: discord.Interaction, text: str, font: str | None = None, size: int = 47):
+    async def fire_text(self, interaction: discord.Interaction, text: str, font: str | None = None, size: int = 47, private: bool = False):
         if size <= 0:
             await interaction.response.send_message("Font size must be a positive integer.", ephemeral=True)
             return
@@ -1733,10 +1734,10 @@ class MiscActions(commands.Cog):
                 return
         else:
             font_path = None
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=private)
 
         gif = make_watermarked_gif(text, watermark="stupid fucking watermark", font_path=font_path, size=size)
-        await interaction.followup.send(file=discord.File(gif, filename="fire.gif"))
+        await interaction.followup.send(file=discord.File(gif, filename="fire.gif"), ephemeral=private)
 
 # DEPRECATED
 class HammerFeatures(commands.Cog):
