@@ -1648,6 +1648,246 @@ Configured member role for this server: {get_roles(guild, self.member_role_id.ge
             ephemeral=True,
         )
 
+class SecurityActions(commands.Cog):
+
+    class Clique:
+        def __init__(self, members: set[int], name: str | None = None):
+            self.members = members
+            self.name = name
+
+        def __iter__(self):
+            return iter(self.members)
+
+        def __contains__(self, member_id: int) -> bool:
+            return member_id in self.members
+
+    def __init__(self, bot: commands.Bot | commands.AutoShardedBot, data_path: Path | None = None) -> None:
+        self.bot = bot
+        self.data_path = data_path or Path(__file__).with_name("security_data.json")
+        self.servers_cliques: dict[int, list[SecurityActions.Clique]] = {}  # server_id -> list of cliques
+
+        if self.data_path.is_file():
+            with open(self.data_path, "r") as f:
+                data = json.load(f)
+                for server_id_str, cliques_data in data.items():
+                    server_id = int(server_id_str)
+                    cliques = []
+                    for clique_data in cliques_data:
+                        members = set(clique_data["members"])
+                        name = clique_data.get("name")
+                        cliques.append(SecurityActions.Clique(members, name))
+                    self.servers_cliques[server_id] = cliques
+
+    def save_data(self) -> None:
+        data = {}
+        for server_id, cliques in self.servers_cliques.items():
+            cliques_data = []
+            for clique in cliques:
+                clique_data = {
+                    "members": list(clique.members),
+                    "name": clique.name
+                }
+                cliques_data.append(clique_data)
+            data[str(server_id)] = cliques_data
+
+        with open(self.data_path, "w") as f:
+            json.dump(data, f, indent=4)
+
+    def _get_cliques(self, guild_id: int) -> list[SecurityActions.Clique]:
+        return self.servers_cliques.get(guild_id, [])
+
+    @app_commands.command(name="list_cliques", description="List all cliques in the server.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def list_cliques(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This command only works in servers.", ephemeral=True)
+            return
+
+        cliques = self._get_cliques(interaction.guild.id)
+        if not cliques:
+            await interaction.response.send_message("No cliques found in this server.", ephemeral=True)
+            return
+
+        clique_list = "\n".join([f"(ID {i}) {clique.name or 'Unnamed Clique'}: {', '.join(str(member) for member in clique)}" for i, clique in enumerate(cliques, start=1)])
+        await interaction.response.send_message(f"**Cliques in {interaction.guild.name}:**\n{clique_list}", ephemeral=True)
+
+
+    @app_commands.command(name="add_clique", description="Add a new clique to the server.")
+    @app_commands.describe(members="A list of member IDs to include in the clique, separated by commas.", name="The name of the clique.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def add_clique(self, interaction: discord.Interaction, members: str, name: str | None = None) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This command only works in servers.", ephemeral=True)
+            return
+
+        member_ids = set()
+        for member_id_str in members.split(","):
+            try:
+                member_id = int(member_id_str.strip())
+                member_ids.add(member_id)
+            except ValueError:
+                await interaction.response.send_message(f"Invalid member ID: {member_id_str}", ephemeral=True)
+                return
+
+        new_clique = SecurityActions.Clique(members=member_ids, name=name)
+        if interaction.guild.id not in self.servers_cliques:
+            self.servers_cliques[interaction.guild.id] = []
+        self.servers_cliques[interaction.guild.id].append(new_clique)
+        self.save_data()
+
+        await interaction.response.send_message(f"Clique '{name or 'Unnamed Clique'}' added with members: {', '.join(str(member) for member in member_ids)}", ephemeral=True)
+
+    @app_commands.command(name="remove_clique", description="Remove a clique from the server by its index.")
+    @app_commands.describe(index="The index of the clique to remove (1-based).")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def remove_clique(self, interaction: discord.Interaction, index: int) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This command only works in servers.", ephemeral=True)
+            return
+
+        if interaction.guild.id not in self.servers_cliques:
+            await interaction.response.send_message("No cliques found in this server.", ephemeral=True)
+            return
+
+        cliques = self.servers_cliques[interaction.guild.id]
+        if not (1 <= index <= len(cliques)):
+            await interaction.response.send_message("Invalid clique index.", ephemeral=True)
+            return
+
+        removed_clique = cliques.pop(index - 1)
+        self.save_data()
+
+        await interaction.response.send_message(f"Clique '{removed_clique.name or 'Unnamed Clique'}' removed.", ephemeral=True)
+
+    @app_commands.command(name="clear_cliques", description="Clear all cliques from the server.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def clear_cliques(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This command only works in servers.", ephemeral=True)
+            return
+
+        if interaction.guild.id not in self.servers_cliques:
+            await interaction.response.send_message("No cliques found in this server.", ephemeral=True)
+            return
+
+        self.servers_cliques[interaction.guild.id].clear()
+        self.save_data()
+
+        await interaction.response.send_message("All cliques cleared.", ephemeral=True)
+
+    @app_commands.command(name="modify_clique", description="Modify an existing clique by its index.")
+    @app_commands.describe(index="The index of the clique to modify (1-based).", 
+                           name="The new name for the clique (if any).", 
+                           add_members="A list of member IDs to add to the clique, separated by commas.",
+                           remove_members="A list of member IDs to remove from the clique, separated by commas.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def modify_clique(self, interaction: discord.Interaction, index: int, name: str | None, add_members: str | None, remove_members: str | None) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This command only works in servers.", ephemeral=True)
+            return
+
+        if interaction.guild.id not in self.servers_cliques:
+            await interaction.response.send_message("No cliques found in this server.", ephemeral=True)
+            return
+
+        cliques = self.servers_cliques[interaction.guild.id]
+        if not (1 <= index <= len(cliques)):
+            await interaction.response.send_message("Invalid clique index.", ephemeral=True)
+            return
+
+        clique = cliques[index - 1]
+        clique.name = name
+        if add_members:
+            clique.members.update([int(member_id) for member_id in add_members.split(",") if member_id.isdigit()])
+        if remove_members:
+            clique.members = {member_id for member_id in clique.members if str(member_id) not in remove_members.split(",")}
+        self.save_data()
+
+        await interaction.response.send_message(f"Clique '{clique.name or 'Unnamed Clique'}' modified.", ephemeral=True)
+
+    @app_commands.command(name="get_clique_by_name", description="Get a clique by its name.")
+    @app_commands.describe(name="The name of the clique to retrieve.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def get_clique_by_name(self, interaction: discord.Interaction, name: str) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This command only works in servers.", ephemeral=True)
+            return
+
+        if interaction.guild.id not in self.servers_cliques:
+            await interaction.response.send_message("No cliques found in this server.", ephemeral=True)
+            return
+
+        cliques = self.servers_cliques[interaction.guild.id]
+        clique = next((c for c in cliques if c.name == name), None)
+        if not clique:
+            await interaction.response.send_message(f"No clique found with the name '{name}'.", ephemeral=True)
+            return
+
+        await interaction.response.send_message(f"Found clique: {clique.name or 'Unnamed Clique'} with members: {', '.join(str(member_id) for member_id in clique.members)}", ephemeral=True)
+
+
+    @app_commands.command(name="moderate_clique", description="Perform a moderation action on all members of a clique by its index.")
+    @app_commands.describe(index="The index of the clique to moderate (1-based).",
+                           action="The moderation action to perform (ban, kick, mute, unmute).",
+                            reason="The reason for the moderation action (optional).")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def moderate_clique(self, interaction: discord.Interaction, index: int, action: str, reason: str | None = None) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This command only works in servers.", ephemeral=True)
+            return
+
+        if interaction.guild.id not in self.servers_cliques:
+            await interaction.response.send_message("No cliques found in this server.", ephemeral=True)
+            return
+
+        cliques = self.servers_cliques[interaction.guild.id]
+        if not (1 <= index <= len(cliques)):
+            await interaction.response.send_message("Invalid clique index.", ephemeral=True)
+            return
+
+        clique = cliques[index - 1]
+        action = action.lower()
+
+        for member_id in clique.members:
+            member = interaction.guild.get_member(member_id)
+            if member is None:
+                continue
+
+            try:
+                if action == "ban":
+                    await member.ban(reason=reason)
+                elif action == "kick":
+                    await member.kick(reason=reason)
+                elif action == "mute":
+                    await member.edit(mute=True, reason=reason)
+                elif action == "unmute":
+                    await member.edit(mute=False, reason=reason)
+                else:
+                    await interaction.response.send_message(f"Invalid action '{action}'. Valid actions are: ban, kick, mute, unmute.", ephemeral=True)
+                    return
+            except discord.Forbidden:
+                await interaction.response.send_message(f"Failed to {action} {member.display_name}. I might not have the correct permissions.", ephemeral=True)
+                return
+            except discord.HTTPException as e:
+                await interaction.response.send_message(f"Failed to {action} {member.display_name}. API error: {e}", ephemeral=True)
+                return
+
+        await interaction.response.send_message(f"Successfully performed '{action}' on all members of the clique '{clique.name or 'Unnamed Clique'}'.", ephemeral=True)
+
 class MiscActions(commands.Cog):
     def __init__(self, bot: commands.Bot | commands.AutoShardedBot) -> None:
         self.bot = bot
