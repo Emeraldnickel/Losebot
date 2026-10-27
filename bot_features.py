@@ -1710,7 +1710,7 @@ class SecurityActions(commands.Cog):
             await interaction.response.send_message("No cliques found in this server.", ephemeral=True)
             return
 
-        clique_list = "\n".join([f"(ID {i}) {clique.name or 'Unnamed Clique'}: {', '.join(str(member) for member in clique)}" for i, clique in enumerate(cliques, start=1)])
+        clique_list = "\n".join([f"(ID {i}) {clique.name or 'Unnamed Clique'}" for i, clique in enumerate(cliques, start=1)])
         await interaction.response.send_message(f"**Cliques in {interaction.guild.name}:**\n{clique_list}", ephemeral=True)
 
     @app_commands.command(name="get_clique", description="Get a clique by its index.")
@@ -1852,7 +1852,7 @@ class SecurityActions(commands.Cog):
             await interaction.response.send_message(f"No clique found with the name '{name}'.", ephemeral=True)
             return
 
-        await interaction.response.send_message(f"Found clique: {clique.name or 'Unnamed Clique'} with members: {', '.join(interaction.guild.get_member(member_id).mention if interaction.guild.get_member(member_id) else f'({member_id})' for member_id in clique.members)}", ephemeral=True)
+        await interaction.response.send_message(f"Found clique: {clique.name or 'Unnamed Clique'} (ID: {self.servers_cliques[interaction.guild.id].index(clique) + 1}) with members: {', '.join(interaction.guild.get_member(member_id).mention if interaction.guild.get_member(member_id) else f'({member_id})' for member_id in clique.members)}", ephemeral=True)
 
 
     @app_commands.command(name="moderate_clique", description="Perform a moderation action on all members of a clique by its index.")
