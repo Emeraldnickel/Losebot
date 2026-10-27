@@ -1729,7 +1729,7 @@ class SecurityActions(commands.Cog):
             return
 
         clique = cliques[index - 1]
-        await interaction.response.send_message(f"Clique '{clique.name or 'Unnamed Clique'}': {(', '.join(interaction.guild.get_member(member).mention if interaction.guild.get_member(member) else "(Error)" for member in clique))}", ephemeral=True)
+        await interaction.response.send_message(f"Clique '{clique.name or 'Unnamed Clique'}': {(', '.join(interaction.guild.get_member(member).mention if interaction.guild.get_member(member) else f'({member})' for member in clique))}", ephemeral=True)
 
     @app_commands.command(name="add_clique", description="Add a new clique to the server.")
     @app_commands.describe(members="A list of member IDs to include in the clique, separated by commas.", name="The name of the clique.")
