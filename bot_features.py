@@ -1713,6 +1713,23 @@ class SecurityActions(commands.Cog):
         clique_list = "\n".join([f"(ID {i}) {clique.name or 'Unnamed Clique'}: {', '.join(str(member) for member in clique)}" for i, clique in enumerate(cliques, start=1)])
         await interaction.response.send_message(f"**Cliques in {interaction.guild.name}:**\n{clique_list}", ephemeral=True)
 
+    @app_commands.command(name="get_clique", description="Get a clique by its index.")
+    @app_commands.describe(index="The index of the clique to retrieve (1-based).")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.checks.has_permissions(administrator=True)
+    async def get_clique(self, interaction: discord.Interaction, index: int) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("This command only works in servers.", ephemeral=True)
+            return
+
+        cliques = self._get_cliques(interaction.guild.id)
+        if not (1 <= index <= len(cliques)):
+            await interaction.response.send_message("Invalid clique index.", ephemeral=True)
+            return
+
+        clique = cliques[index - 1]
+        await interaction.response.send_message(f"Clique '{clique.name or 'Unnamed Clique'}': {', '.join(str(member) for member in clique)}", ephemeral=True)
 
     @app_commands.command(name="add_clique", description="Add a new clique to the server.")
     @app_commands.describe(members="A list of member IDs to include in the clique, separated by commas.", name="The name of the clique.")
@@ -1840,12 +1857,13 @@ class SecurityActions(commands.Cog):
 
     @app_commands.command(name="moderate_clique", description="Perform a moderation action on all members of a clique by its index.")
     @app_commands.describe(index="The index of the clique to moderate (1-based).",
-                           action="The moderation action to perform (ban, kick, mute, unmute).",
-                            reason="The reason for the moderation action (optional).")
+                           action="The moderation action to perform (ban, kick, mute, unmute, timeout).",
+                            reason="The reason for the moderation action (optional).",
+                            duration="The duration in minutes for a timeout (optional).")
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.checks.has_permissions(administrator=True)
-    async def moderate_clique(self, interaction: discord.Interaction, index: int, action: str, reason: str | None = None) -> None:
+    async def moderate_clique(self, interaction: discord.Interaction, index: int, action: str, reason: str | None = None, duration: int | None = None) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("This command only works in servers.", ephemeral=True)
             return
@@ -1876,8 +1894,12 @@ class SecurityActions(commands.Cog):
                     await member.edit(mute=True, reason=reason)
                 elif action == "unmute":
                     await member.edit(mute=False, reason=reason)
+                elif action == "timeout":
+                    if duration is None:
+                        duration = 10
+                    await member.timeout(discord.utils.utcnow() + datetime.timedelta(minutes=duration), reason=reason)
                 else:
-                    await interaction.response.send_message(f"Invalid action '{action}'. Valid actions are: ban, kick, mute, unmute.", ephemeral=True)
+                    await interaction.response.send_message(f"Invalid action '{action}'. Valid actions are: ban, kick, mute, unmute, timeout.", ephemeral=True)
                     return
             except discord.Forbidden:
                 await interaction.response.send_message(f"Failed to {action} {member.display_name}. I might not have the correct permissions.", ephemeral=True)
